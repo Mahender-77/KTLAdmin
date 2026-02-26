@@ -13,12 +13,15 @@ export const AdminAuthProvider = ({ children }: Props) => {
   );
 
   const login = async (email: string, password: string) => {
-    const res = await axiosInstance.post("/api/auth/login", {
-      email,
-      password,
-    });
+    const res = await axiosInstance.post(
+      "/api/auth/login",
+      { email: email.trim(), password },
+      { headers: { "Content-Type": "application/json" } }
+    );
 
-    localStorage.setItem("adminToken", res.data.accessToken);
+    const token = res.data?.accessToken;
+    if (!token) throw new Error("No token received");
+    localStorage.setItem("adminToken", token);
     setIsAuthenticated(true);
   };
 

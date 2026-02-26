@@ -59,7 +59,7 @@ export default function Stores() {
 const fetchStores = useCallback(async () => {
   try {
     const res = await axiosInstance.get("/api/stores");
-    setStores(res.data);
+    setStores(res.data?.data ?? []);
   } catch (error) {
     console.error("Error loading stores:", error);
   }
@@ -74,7 +74,7 @@ const fetchStores = useCallback(async () => {
       const res = await axiosInstance.get("/api/stores", {
         signal: controller.signal,
       });
-      setStores(res.data);
+      setStores(res.data?.data ?? []);
     } catch (err) {
       if (!controller.signal.aborted) {
         console.error(err);

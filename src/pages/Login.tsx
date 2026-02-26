@@ -25,16 +25,43 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      toast({ title: "Email required", description: "Please enter your email", status: "warning", duration: 3000 });
+      return;
+    }
+    if (!password) {
+      toast({ title: "Password required", description: "Please enter your password", status: "warning", duration: 3000 });
+      return;
+    }
     try {
       setLoading(true);
-      await login(email, password);
+      await login(trimmedEmail, password);
       navigate("/");
-    } catch {
+    } catch (err: unknown) {
+      const ax = err as {
+        response?: {
+          data?: {
+            message?: string;
+            detail?: { errors?: Record<string, unknown> };
+          };
+        };
+      };
+      const message = ax.response?.data?.message ?? "Invalid credentials";
+      const errors = ax.response?.data?.detail?.errors as Record<string, string[] | Record<string, string[]>> | undefined;
+      const collectMessages = (o: unknown): string[] => {
+        if (Array.isArray(o)) return o.filter((x): x is string => typeof x === "string");
+        if (o && typeof o === "object") return Object.values(o).flatMap(collectMessages);
+        return [];
+      };
+      const msgList = errors ? collectMessages(errors) : [];
+      const description = msgList.length > 0 ? msgList.join(". ") : message;
       toast({
         title: "Login Failed",
-        description: "Invalid credentials",
+        description,
         status: "error",
-        duration: 3000,
+        duration: 5000,
+        isClosable: true,
       });
     } finally {
       setLoading(false);

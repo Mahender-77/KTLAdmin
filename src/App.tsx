@@ -10,6 +10,7 @@ import Categories from "./pages/Categories";
 import { AdminAuthProvider } from "./context/AdminAuthProvider";
 import { useAdminAuth } from "./context/useAdminAuth";
 import Products from "./pages/Products";
+import ProductDetail from "./pages/ProductDetail";
 import Stores from "./pages/Stores";
 
 // 🔐 Private Route Wrapper
@@ -54,6 +55,14 @@ function AppRoutes() {
         element={
           <PrivateRoute>
             <Products />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/products/:id"
+        element={
+          <PrivateRoute>
+            <ProductDetail />
           </PrivateRoute>
         }
       />
