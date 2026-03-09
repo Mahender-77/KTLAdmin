@@ -76,6 +76,7 @@ import {
   AddIcon,
   SearchIcon,
   DeleteIcon,
+  EditIcon,
   InfoOutlineIcon,
   CheckIcon,
   WarningIcon,
@@ -132,6 +133,24 @@ interface Product {
   minOrderQty?: number;
   maxOrderQty?: number;
 }
+
+export interface InitialBatchEntry {
+  storeId: string;
+  quantity: string;
+  batchNumber: string;
+  costPrice: string;
+  mfgDate: string;
+  expiryDate: string;
+}
+
+const emptyBatchEntry = (): InitialBatchEntry => ({
+  storeId: "",
+  quantity: "",
+  batchNumber: "",
+  costPrice: "",
+  mfgDate: "",
+  expiryDate: "",
+});
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -296,109 +315,94 @@ interface BatchFormProps {
   enabled: boolean;
   onToggle: (v: boolean) => void;
   stores: Store[];
-  storeId: string;
-  setStoreId: (v: string) => void;
-  quantity: string;
-  setQuantity: (v: string) => void;
-  batchNumber: string;
-  setBatchNumber: (v: string) => void;
-  costPrice: string;
-  setCostPrice: (v: string) => void;
+  batches: InitialBatchEntry[];
+  onBatchChange: (index: number, field: keyof InitialBatchEntry, value: string) => void;
   hasExpiry: boolean;
-  mfgDate: string;
-  setMfgDate: (v: string) => void;
-  expiryDate: string;
-  setExpiryDate: (v: string) => void;
   baseUnit: string;
   pricingMode: string;
   variants: Variant[];
-  selectedVariantId: string;
-  setSelectedVariantId: (v: string) => void;
 }
 
-const BatchForm = (p: BatchFormProps) => (
-  <Box>
-    <FormControl display="flex" alignItems="center" mb={4}>
-      <FormLabel mb={0} fontWeight="semibold">Add initial stock batch?</FormLabel>
-      <Switch isChecked={p.enabled} onChange={(e) => p.onToggle(e.target.checked)} colorScheme="orange" />
-      <Text ml={2} fontSize="sm" color="gray.500">{p.enabled ? "Yes" : "Skip for now"}</Text>
-    </FormControl>
-
-    {p.enabled && (
-      <VStack spacing={4} p={4} bg="orange.50" borderRadius="lg" border="1px solid" borderColor="orange.200" align="stretch">
+const BatchForm = (p: BatchFormProps) => {
+  const renderBatchFields = (batch: InitialBatchEntry, index: number, variantLabel?: string) => (
+    <VStack key={index} spacing={4} p={4} bg="orange.50" borderRadius="lg" border="1px solid" borderColor="orange.200" align="stretch">
+      {variantLabel && (
+        <Text fontSize="sm" fontWeight="bold" color="orange.700">
+          📦 {variantLabel}
+        </Text>
+      )}
+      {!variantLabel && index === 0 && (
         <Text fontSize="sm" fontWeight="bold" color="orange.700">📦 Batch Details</Text>
-
+      )}
+      <Grid templateColumns="repeat(2, 1fr)" gap={3}>
+        <FormControl isRequired>
+          <FormLabel fontSize="sm">Store</FormLabel>
+          <Select size="sm" placeholder="Select store" value={batch.storeId} onChange={(e) => p.onBatchChange(index, "storeId", e.target.value)}>
+            {p.stores.map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
+          </Select>
+        </FormControl>
+        <FormControl isRequired>
+          <FormLabel fontSize="sm">Quantity (in {p.baseUnit})</FormLabel>
+          <Input
+            size="sm"
+            type="number"
+            min={p.baseUnit === "pcs" ? 1 : 0.01}
+            step={p.baseUnit === "pcs" ? 1 : 0.01}
+            placeholder={p.baseUnit === "pcs" ? "e.g. 100" : "e.g. 25.5"}
+            value={batch.quantity}
+            onChange={(e) => p.onBatchChange(index, "quantity", e.target.value)}
+          />
+        </FormControl>
+        <FormControl isRequired>
+          <FormLabel fontSize="sm">Batch Number</FormLabel>
+          <Input size="sm" placeholder="e.g. BATCH-001" value={batch.batchNumber} onChange={(e) => p.onBatchChange(index, "batchNumber", e.target.value)} />
+        </FormControl>
+        <FormControl>
+          <FormLabel fontSize="sm">Cost Price (₹, optional)</FormLabel>
+          <Input size="sm" type="number" min={0} step={0.01} placeholder="e.g. 80" value={batch.costPrice} onChange={(e) => p.onBatchChange(index, "costPrice", e.target.value)} />
+          <FormHelperText fontSize="xs">Used for margin analytics</FormHelperText>
+        </FormControl>
+      </Grid>
+      {p.hasExpiry && (
         <Grid templateColumns="repeat(2, 1fr)" gap={3}>
           <FormControl isRequired>
-            <FormLabel fontSize="sm">Store</FormLabel>
-            <Select size="sm" placeholder="Select store" value={p.storeId} onChange={(e) => p.setStoreId(e.target.value)}>
-              {p.stores.map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
-            </Select>
+            <FormLabel fontSize="sm">Manufacturing Date</FormLabel>
+            <Input size="sm" type="date" value={batch.mfgDate} onChange={(e) => p.onBatchChange(index, "mfgDate", e.target.value)} />
           </FormControl>
-
           <FormControl isRequired>
-            <FormLabel fontSize="sm">Quantity (in {p.baseUnit})</FormLabel>
-            <Input
-              size="sm"
-              type="number"
-              min={p.baseUnit === "pcs" ? 1 : 0.01}
-              step={p.baseUnit === "pcs" ? 1 : 0.01}
-              placeholder={p.baseUnit === "pcs" ? "e.g. 100" : "e.g. 25.5"}
-              value={p.quantity}
-              onChange={(e) => p.setQuantity(e.target.value)}
-            />
-          </FormControl>
-
-          <FormControl isRequired>
-            <FormLabel fontSize="sm">Batch Number</FormLabel>
-            <Input size="sm" placeholder="e.g. BATCH-001" value={p.batchNumber} onChange={(e) => p.setBatchNumber(e.target.value)} />
-          </FormControl>
-
-          <FormControl>
-            <FormLabel fontSize="sm">Cost Price (₹, optional)</FormLabel>
-            <Input size="sm" type="number" min={0} step={0.01} placeholder="e.g. 80" value={p.costPrice} onChange={(e) => p.setCostPrice(e.target.value)} />
-            <FormHelperText fontSize="xs">Used for margin analytics</FormHelperText>
+            <FormLabel fontSize="sm">Expiry Date</FormLabel>
+            <Input size="sm" type="date" value={batch.expiryDate} onChange={(e) => p.onBatchChange(index, "expiryDate", e.target.value)} />
+            <FormHelperText fontSize="xs">Must be after manufacturing date</FormHelperText>
           </FormControl>
         </Grid>
+      )}
+      {p.hasExpiry && batch.mfgDate && batch.expiryDate && new Date(batch.expiryDate) <= new Date(batch.mfgDate) && (
+        <Alert status="error" size="sm" borderRadius="md">
+          <AlertIcon />
+          <AlertDescription fontSize="xs">Expiry date must be after manufacturing date.</AlertDescription>
+        </Alert>
+      )}
+    </VStack>
+  );
 
-        {p.pricingMode === "fixed" && p.variants.length > 0 && (
-          <FormControl isRequired>
-            <FormLabel fontSize="sm">Linked Variant</FormLabel>
-            <Select size="sm" placeholder="Select variant" value={p.selectedVariantId} onChange={(e) => p.setSelectedVariantId(e.target.value)}>
-              {p.variants.map((v, i) => (
-                <option key={i} value={String(i)}>
-                  {v.type} — {v.value}{v.unit} @ ₹{v.price}
-                </option>
-              ))}
-            </Select>
-            <FormHelperText fontSize="xs">Each fixed variant needs its own batch</FormHelperText>
-          </FormControl>
-        )}
+  return (
+    <Box>
+      <FormControl display="flex" alignItems="center" mb={4}>
+        <FormLabel mb={0} fontWeight="semibold">Add initial stock batch{p.batches.length > 1 ? "es" : ""}?</FormLabel>
+        <Switch isChecked={p.enabled} onChange={(e) => p.onToggle(e.target.checked)} colorScheme="orange" />
+        <Text ml={2} fontSize="sm" color="gray.500">{p.enabled ? (p.batches.length > 1 ? `Yes (${p.batches.length} variants)` : "Yes") : "Skip for now"}</Text>
+      </FormControl>
 
-        {p.hasExpiry && (
-          <Grid templateColumns="repeat(2, 1fr)" gap={3}>
-            <FormControl isRequired>
-              <FormLabel fontSize="sm">Manufacturing Date</FormLabel>
-              <Input size="sm" type="date" value={p.mfgDate} onChange={(e) => p.setMfgDate(e.target.value)} />
-            </FormControl>
-            <FormControl isRequired>
-              <FormLabel fontSize="sm">Expiry Date</FormLabel>
-              <Input size="sm" type="date" value={p.expiryDate} onChange={(e) => p.setExpiryDate(e.target.value)} />
-              <FormHelperText fontSize="xs">Must be after manufacturing date</FormHelperText>
-            </FormControl>
-          </Grid>
-        )}
-
-        {p.hasExpiry && p.mfgDate && p.expiryDate && new Date(p.expiryDate) <= new Date(p.mfgDate) && (
-          <Alert status="error" size="sm" borderRadius="md">
-            <AlertIcon />
-            <AlertDescription fontSize="xs">Expiry date must be after manufacturing date.</AlertDescription>
-          </Alert>
-        )}
-      </VStack>
-    )}
-  </Box>
-);
+      {p.enabled && (
+        <VStack spacing={4} align="stretch">
+          {p.pricingMode === "fixed" && p.variants.length > 0
+            ? p.batches.map((batch, i) => renderBatchFields(batch, i, `Variant ${i + 1}: ${p.variants[i]?.value}${p.variants[i]?.unit} @ ₹${p.variants[i]?.price ?? "—"}`))
+            : p.batches.map((batch, i) => renderBatchFields(batch, i))}
+        </VStack>
+      )}
+    </Box>
+  );
+};
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -445,15 +449,13 @@ export default function Products() {
   // ── Step 3: Variants ──
   const [variants, setVariants] = useState<Variant[]>([]);
 
-  // ── Step 4: Initial Stock ──
+  // ── Step 4: Initial Stock (one entry per variant for fixed, one for unit/custom-weight) ──
   const [addInitialStock, setAddInitialStock] = useState(false);
-  const [initialStoreId, setInitialStoreId] = useState("");
-  const [initialQuantity, setInitialQuantity] = useState("");
-  const [initialBatchNumber, setInitialBatchNumber] = useState("");
-  const [initialCostPrice, setInitialCostPrice] = useState("");
-  const [initialMfgDate, setInitialMfgDate] = useState("");
-  const [initialExpiryDate, setInitialExpiryDate] = useState("");
-  const [selectedVariantIndex, setSelectedVariantIndex] = useState("");
+  const [initialBatches, setInitialBatches] = useState<InitialBatchEntry[]>([emptyBatchEntry()]);
+
+  // ── Edit mode ──
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [loadingEdit, setLoadingEdit] = useState(false);
 
   // ── Derived ──
   const flatCategories = useMemo(() => flattenCategories(categories), [categories]);
@@ -471,6 +473,16 @@ export default function Products() {
     if (filterPricingMode !== "all") list = list.filter((p) => p.pricingMode === filterPricingMode);
     return list;
   }, [searchQuery, filterCategory, filterStatus, filterPricingMode, products]);
+
+  // Keep initialBatches length in sync: one per variant for fixed, one for unit/custom-weight
+  useEffect(() => {
+    const targetLength = pricingMode === "fixed" && variants.length > 0 ? variants.length : 1;
+    setInitialBatches((prev) => {
+      if (prev.length === targetLength) return prev;
+      const next = Array.from({ length: targetLength }, (_, i) => prev[i] ?? emptyBatchEntry());
+      return next;
+    });
+  }, [pricingMode, variants.length]);
 
   // ── Load ──
   const loadData = async () => {
@@ -505,14 +517,14 @@ export default function Products() {
   // ── Reset ──
   const resetForm = () => {
     setActiveStep(0);
+    setEditingProductId(null);
     setName(""); setDescription(""); setSelectedCategory(""); setSelectedSubCategory("");
     setTags([]); setTagInput(""); setImage(null); setImagePreview(null);
     setPricingMode("unit"); setBaseUnit("pcs"); setPricePerUnit(""); setHasExpiry(false);
     setShelfLifeDays(""); setTaxRate(""); setMinOrderQty(""); setMaxOrderQty("");
     setVariants([]);
-    setAddInitialStock(false); setInitialStoreId(""); setInitialQuantity("");
-    setInitialBatchNumber(""); setInitialCostPrice(""); setInitialMfgDate("");
-    setInitialExpiryDate(""); setSelectedVariantIndex("");
+    setAddInitialStock(false);
+    setInitialBatches([emptyBatchEntry()]);
   };
 
   const handleClose = () => { resetForm(); onClose(); };
@@ -532,6 +544,9 @@ export default function Products() {
   const removeVariant = (i: number) => setVariants((v) => v.filter((_, idx) => idx !== i));
   const updateVariant = (i: number, field: keyof Variant, val: string | number) =>
     setVariants((v) => v.map((vv, idx) => (idx === i ? { ...vv, [field]: val } : vv)));
+
+  const updateInitialBatch = (index: number, field: keyof InitialBatchEntry, value: string) =>
+    setInitialBatches((prev) => prev.map((b, i) => (i === index ? { ...b, [field]: value } : b)));
 
   // ── Validation per step ──
   const validateStep = (step: number): string | null => {
@@ -559,57 +574,74 @@ export default function Products() {
   const goNext = () => {
     const err = validateStep(activeStep);
     if (err) { toast({ title: "Validation", description: err, status: "warning", duration: 3000 }); return; }
-    setActiveStep((s) => s + 1);
+    setActiveStep(activeStep + 1);
   };
 
-  // ── Create ──
+  // ── Create / Update ──
   const handleCreate = async () => {
     for (let i = 0; i < STEPS.length - 1; i++) {
       const err = validateStep(i);
       if (err) { toast({ title: "Validation", description: err, status: "warning", duration: 3000 }); setActiveStep(i); return; }
     }
 
+    const categoryId = selectedSubCategory || selectedCategory;
+    const fd = new FormData();
+    fd.append("name", name);
+    fd.append("description", description || "");
+    fd.append("category", categoryId);
+    fd.append("pricingMode", pricingMode);
+    fd.append("baseUnit", baseUnit);
+    fd.append("pricePerUnit", String(Number(pricePerUnit)));
+    fd.append("hasExpiry", hasExpiry ? "true" : "false");
+    if (tags.length) fd.append("tags", JSON.stringify(tags));
+    if (taxRate) fd.append("taxRate", taxRate);
+    if (minOrderQty) fd.append("minOrderQty", minOrderQty);
+    if (maxOrderQty) fd.append("maxOrderQty", maxOrderQty);
+    if (hasExpiry && shelfLifeDays && Number(shelfLifeDays) > 0) fd.append("shelfLifeDays", shelfLifeDays);
+    fd.append("variants", JSON.stringify(pricingMode === "fixed" ? variants : []));
+    if (image) fd.append("image", image);
+
     try {
-      const categoryId = selectedSubCategory || selectedCategory;
-      const fd = new FormData();
-      fd.append("name", name);
-      fd.append("description", description || "");
-      fd.append("category", categoryId);
-      fd.append("pricingMode", pricingMode);
-      fd.append("baseUnit", baseUnit);
-      fd.append("pricePerUnit", String(Number(pricePerUnit)));
-      fd.append("hasExpiry", hasExpiry ? "true" : "false");
-      if (tags.length) fd.append("tags", JSON.stringify(tags));
-      if (taxRate) fd.append("taxRate", taxRate);
-      if (minOrderQty) fd.append("minOrderQty", minOrderQty);
-      if (maxOrderQty) fd.append("maxOrderQty", maxOrderQty);
-      if (hasExpiry && shelfLifeDays && Number(shelfLifeDays) > 0) fd.append("shelfLifeDays", shelfLifeDays);
-      fd.append("variants", JSON.stringify(pricingMode === "fixed" ? variants : []));
-      if (image) fd.append("image", image);
+      if (editingProductId) {
+        await axiosInstance.patch(`/api/products/${editingProductId}`, fd);
+        toast({ title: "✅ Product updated successfully!", status: "success", duration: 3000 });
+        handleClose();
+        await loadData();
+        return;
+      }
 
       const { data: created } = await axiosInstance.post("/api/products", fd);
 
-      // Initial batch
-      if (addInitialStock && initialStoreId && initialBatchNumber.trim() && initialQuantity) {
-        const qty = baseUnit === "pcs" ? Math.floor(Number(initialQuantity)) : Number(initialQuantity);
-        if (qty > 0) {
+      // Initial batches: one per variant for fixed, one for unit/custom-weight
+      if (addInitialStock && initialBatches.length > 0) {
+        let batchErrors = 0;
+        for (let i = 0; i < initialBatches.length; i++) {
+          const b = initialBatches[i];
+          if (!b.storeId?.trim() || !b.batchNumber?.trim() || !b.quantity) continue;
+          const qty = baseUnit === "pcs" ? Math.floor(Number(b.quantity)) : Number(b.quantity);
+          if (qty <= 0) continue;
           const payload: Record<string, unknown> = {
-            store: initialStoreId,
+            store: b.storeId,
             quantity: qty,
-            batchNumber: initialBatchNumber.trim(),
+            batchNumber: b.batchNumber.trim(),
           };
-          if (initialCostPrice) payload.costPrice = Number(initialCostPrice);
-          if (hasExpiry) {
-            payload.manufacturingDate = new Date(initialMfgDate).toISOString();
-            payload.expiryDate = new Date(initialExpiryDate).toISOString();
+          if (b.costPrice) payload.costPrice = Number(b.costPrice);
+          if (hasExpiry && b.mfgDate && b.expiryDate && new Date(b.expiryDate) > new Date(b.mfgDate)) {
+            payload.manufacturingDate = new Date(b.mfgDate).toISOString();
+            payload.expiryDate = new Date(b.expiryDate).toISOString();
           }
-          if (pricingMode === "fixed" && selectedVariantIndex !== "" && created.variants?.[Number(selectedVariantIndex)]?._id) {
-            payload.variant = created.variants[Number(selectedVariantIndex)]._id;
+          if (pricingMode === "fixed" && created.variants?.[i]?._id) {
+            payload.variant = created.variants[i]._id;
           }
-          await axiosInstance.post(`/api/products/${created._id}/add-batch`, payload).catch((e) => {
+          try {
+            await axiosInstance.post(`/api/products/${created._id}/add-batch`, payload);
+          } catch (e) {
             console.error("Batch error:", e);
-            toast({ title: "Product created", description: "Could not add initial batch. Add it from product detail.", status: "warning", duration: 5000 });
-          });
+            batchErrors++;
+          }
+        }
+        if (batchErrors > 0) {
+          toast({ title: "Product created", description: `Could not add ${batchErrors} batch(es). Add from product detail.`, status: "warning", duration: 5000 });
         }
       }
 
@@ -619,6 +651,44 @@ export default function Products() {
     } catch (e) {
       console.error(e);
       toast({ title: "Error creating product", status: "error", duration: 3000 });
+    }
+  };
+
+  const handleEdit = async (product: Product) => {
+    try {
+      setLoadingEdit(true);
+      const res = await axiosInstance.get(`/api/products/${product._id}`);
+      const p = res.data;
+      const catId = typeof p.category === "object" && p.category?._id ? p.category._id : p.category;
+      const parentCat = flatCategories.find((c) => c.children?.some((ch: Category) => ch._id === catId));
+      const isSub = !!parentCat?.children?.some((ch: Category) => ch._id === catId);
+      setName(p.name ?? "");
+      setDescription(p.description ?? "");
+      setSelectedCategory(parentCat ? parentCat._id : (catId ?? ""));
+      setSelectedSubCategory(isSub ? (catId ?? "") : "");
+      setTags(Array.isArray(p.tags) ? p.tags : []);
+      setTagInput("");
+      setImage(null);
+      setImagePreview(p.images?.[0] ?? null);
+      setPricingMode((p.pricingMode ?? "unit") as any);
+      setBaseUnit(p.baseUnit ?? "pcs");
+      setPricePerUnit(String(p.pricePerUnit ?? ""));
+      setHasExpiry(p.hasExpiry ?? false);
+      setShelfLifeDays(p.shelfLifeDays != null ? String(p.shelfLifeDays) : "");
+      setTaxRate(p.taxRate != null ? String(p.taxRate) : "");
+      setMinOrderQty(p.minOrderQty != null ? String(p.minOrderQty) : "");
+      setMaxOrderQty(p.maxOrderQty != null ? String(p.maxOrderQty) : "");
+      setVariants(Array.isArray(p.variants) && p.variants.length > 0 ? p.variants : []);
+      setAddInitialStock(false);
+      setInitialBatches([emptyBatchEntry()]);
+      setEditingProductId(product._id);
+      setActiveStep(0);
+      onOpen();
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Error loading product", status: "error", duration: 3000 });
+    } finally {
+      setLoadingEdit(false);
     }
   };
 
@@ -962,24 +1032,12 @@ export default function Products() {
             enabled={addInitialStock}
             onToggle={setAddInitialStock}
             stores={stores}
-            storeId={initialStoreId}
-            setStoreId={setInitialStoreId}
-            quantity={initialQuantity}
-            setQuantity={setInitialQuantity}
-            batchNumber={initialBatchNumber}
-            setBatchNumber={setInitialBatchNumber}
-            costPrice={initialCostPrice}
-            setCostPrice={setInitialCostPrice}
+            batches={initialBatches}
+            onBatchChange={updateInitialBatch}
             hasExpiry={hasExpiry}
-            mfgDate={initialMfgDate}
-            setMfgDate={setInitialMfgDate}
-            expiryDate={initialExpiryDate}
-            setExpiryDate={setInitialExpiryDate}
             baseUnit={baseUnit}
             pricingMode={pricingMode}
             variants={variants}
-            selectedVariantId={selectedVariantIndex}
-            setSelectedVariantId={setSelectedVariantIndex}
           />
         );
 
@@ -1088,13 +1146,20 @@ export default function Products() {
                           <Text fontWeight="semibold" fontSize="sm">₹{product.pricePerUnit ?? "—"} / {product.baseUnit ?? "—"}</Text>
                         ) : (
                           <VStack spacing={0} align="flex-start">
-                            <Text fontWeight="semibold" fontSize="sm">₹{product.variants?.[0]?.price ?? "—"}</Text>
-                            {product.variants?.[0]?.offerPrice != null && (
-                              <Text fontSize="xs" color="orange.600">Offer: ₹{product.variants[0].offerPrice}</Text>
-                            )}
-                            {product.variants?.[0] && (
-                              <Text fontSize="xs" color="gray.400">{product.variants[0].value} {product.variants[0].unit}</Text>
-                            )}
+                            {(() => {
+                              const v0 = product.variants?.[0];
+                              const effectivePrice = v0 && (v0.offerPrice != null && v0.offerPrice > 0) ? v0.offerPrice : v0?.price;
+                              const showOriginal = v0 && (v0.offerPrice != null && v0.offerPrice > 0 && v0.offerPrice < v0.price);
+                              return (
+                                <>
+                                  {showOriginal && <Text fontSize="xs" color="gray.500" textDecoration="line-through">₹{v0.price}</Text>}
+                                  <Text fontWeight="semibold" fontSize="sm">₹{effectivePrice ?? "—"}</Text>
+                                  {v0 && (
+                                    <Text fontSize="xs" color="gray.400">{v0.value} {v0.unit}</Text>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </VStack>
                         )}
                       </Td>
@@ -1112,7 +1177,20 @@ export default function Products() {
                       <Td>
                         <HStack>
                           <Button size="sm" variant="outline" colorScheme="orange" onClick={() => navigate(`/products/${product._id}`)}>View</Button>
-                          <IconButton aria-label="Delete" icon={<DeleteIcon />} size="sm" variant="ghost" colorScheme="red" onClick={() => handleDelete(product._id)} />
+                          <Tooltip label="Edit product">
+                            <IconButton
+                              aria-label="Edit product"
+                              icon={<EditIcon />}
+                              size="sm"
+                              variant="ghost"
+                              colorScheme="orange"
+                              onClick={() => handleEdit(product)}
+                              isLoading={loadingEdit}
+                            />
+                          </Tooltip>
+                          <Tooltip label="Delete product">
+                            <IconButton aria-label="Delete" icon={<DeleteIcon />} size="sm" variant="ghost" colorScheme="red" onClick={() => handleDelete(product._id)} />
+                          </Tooltip>
                         </HStack>
                       </Td>
                     </Tr>
@@ -1129,7 +1207,7 @@ export default function Products() {
         <ModalOverlay backdropFilter="blur(4px)" />
         <ModalContent maxH="90vh">
           <ModalHeader pb={2}>
-            <Text>Add New Product</Text>
+            <Text>{editingProductId ? "Edit Product" : "Add New Product"}</Text>
             <Text fontSize="sm" fontWeight="normal" color="gray.500">
               Step {activeStep + 1} of {STEPS.length} — {STEPS[activeStep].description}
             </Text>
@@ -1158,20 +1236,20 @@ export default function Products() {
 
           <ModalFooter borderTop="1px solid" borderColor="gray.100">
             <HStack w="full" justify="space-between">
-              <Button variant="ghost" onClick={activeStep === 0 ? handleClose : () => setActiveStep((s) => s - 1)}>
+              <Button variant="ghost" onClick={activeStep === 0 ? handleClose : () => setActiveStep(activeStep - 1)}>
                 {activeStep === 0 ? "Cancel" : "← Back"}
               </Button>
               <HStack>
                 {activeStep < STEPS.length - 1 ? (
                   <>
                     {activeStep === 2 && pricingMode !== "fixed" && (
-                      <Button variant="ghost" size="sm" color="gray.400" onClick={() => setActiveStep((s) => s + 1)}>Skip</Button>
+                      <Button variant="ghost" size="sm" color="gray.400" onClick={() => setActiveStep(activeStep + 1)}>Skip</Button>
                     )}
                     <Button colorScheme="orange" onClick={goNext}>Next →</Button>
                   </>
                 ) : (
                   <Button colorScheme="orange" onClick={handleCreate} leftIcon={<CheckIcon />}>
-                    Create Product
+                    {editingProductId ? "Update Product" : "Create Product"}
                   </Button>
                 )}
               </HStack>

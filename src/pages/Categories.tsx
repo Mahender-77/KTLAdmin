@@ -121,13 +121,26 @@ export default function Categories() {
   };
 
   // ================= DELETE =================
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, hasChildren?: boolean) => {
+    if (hasChildren) {
+      toast({
+        title: "Cannot delete category with subcategories",
+        description: "Delete or move subcategories first, then delete this category.",
+        status: "warning",
+        duration: 5000,
+      });
+      return;
+    }
     try {
       await axiosInstance.delete(`/api/categories/${id}`);
       fetchCategories();
       toast({ title: "Category deleted successfully", status: "success" });
-    } catch {
-      toast({ title: "Error deleting category", status: "error" });
+    } catch (error: unknown) {
+      const message =
+        axios.isAxiosError(error) && error.response?.data?.message
+          ? error.response.data.message
+          : "Error deleting category";
+      toast({ title: message, status: "error", duration: 5000 });
     }
   };
 
@@ -193,7 +206,8 @@ const toggleExpand = (id: string) => {
               colorScheme="red"
               variant="ghost"
               icon={<DeleteIcon />}
-              onClick={() => handleDelete(category._id)}
+              onClick={() => handleDelete(category._id, hasChildren)}
+              title={hasChildren ? "Delete subcategories first" : "Delete category"}
             />
           </HStack>
         </Td>

@@ -62,6 +62,17 @@ export default function Sidebar() {
             </Button>
           )}
         </NavLink>
+        <NavLink to="/orders">
+          {({ isActive }) => (
+            <Button
+              justifyContent="flex-start"
+              variant={isActive ? "solid" : "ghost"}
+              colorScheme="orange"
+            >
+              Orders
+            </Button>
+          )}
+        </NavLink>
       </VStack>
     </Box>
   );

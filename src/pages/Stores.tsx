@@ -42,6 +42,7 @@ interface Store {
     lat: number;
     lng: number;
   };
+  deliveryFee?: number;
 }
 
 export default function Stores() {
@@ -49,11 +50,13 @@ export default function Stores() {
   const { isOpen, onOpen, onClose } = useDisclosure();
 
   const [stores, setStores] = useState<Store[]>([]);
+  const [editingStore, setEditingStore] = useState<Store | null>(null);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
   const [lat, setLat] = useState<number | undefined>();
   const [lng, setLng] = useState<number | undefined>();
+  const [deliveryFee, setDeliveryFee] = useState<string>("");
 // Reusable function
 
 const fetchStores = useCallback(async () => {
@@ -98,16 +101,28 @@ const fetchStores = useCallback(async () => {
     }
 
     try {
-      await axiosInstance.post("/api/stores", {
-        name,
-        address,
-        city,
-        lat,
-        lng,
-      });
+      if (editingStore) {
+        await axiosInstance.patch(`/api/stores/${editingStore._id}`, {
+          name,
+          address,
+          city,
+          lat,
+          lng,
+          deliveryFee: deliveryFee ? Number(deliveryFee) : undefined,
+        });
+      } else {
+        await axiosInstance.post("/api/stores", {
+          name,
+          address,
+          city,
+          lat,
+          lng,
+          deliveryFee: deliveryFee ? Number(deliveryFee) : undefined,
+        });
+      }
 
       toast({
-        title: "Store created successfully",
+        title: editingStore ? "Store updated successfully" : "Store created successfully",
         status: "success",
       });
 
@@ -116,6 +131,8 @@ const fetchStores = useCallback(async () => {
       setCity("");
       setLat(undefined);
       setLng(undefined);
+      setDeliveryFee("");
+      setEditingStore(null);
 
       onClose();
       await fetchStores();
@@ -157,6 +174,7 @@ const fetchStores = useCallback(async () => {
               <Th>Name</Th>
               <Th>City</Th>
               <Th>Address</Th>
+              <Th>Delivery Fee (₹)</Th>
               <Th>Coordinates</Th>
               <Th>Action</Th>
             </Tr>
@@ -167,10 +185,29 @@ const fetchStores = useCallback(async () => {
                 <Td>{store.name}</Td>
                 <Td>{store.city}</Td>
                 <Td>{store.address}</Td>
+                <Td>{store.deliveryFee != null ? `₹${store.deliveryFee}` : "—"}</Td>
                 <Td>
                   {store.location?.lat}, {store.location?.lng}
                 </Td>
                 <Td>
+                  <IconButton
+                    aria-label="Edit"
+                    icon={<AddIcon />}
+                    size="sm"
+                    mr={2}
+                    colorScheme="orange"
+                    variant="ghost"
+                    onClick={() => {
+                      setEditingStore(store);
+                      setName(store.name);
+                      setAddress(store.address ?? "");
+                      setCity(store.city ?? "");
+                      setLat(store.location?.lat);
+                      setLng(store.location?.lng);
+                      setDeliveryFee(store.deliveryFee != null ? String(store.deliveryFee) : "");
+                      onOpen();
+                    }}
+                  />{" "}
                   <IconButton
                     aria-label="Delete"
                     icon={<DeleteIcon />}
@@ -213,14 +250,26 @@ const fetchStores = useCallback(async () => {
                 <Input
                   placeholder="Latitude"
                   type="number"
+                  value={lat ?? ""}
                   onChange={(e) => setLat(Number(e.target.value))}
                 />
                 <Input
                   placeholder="Longitude"
                   type="number"
+                  value={lng ?? ""}
                   onChange={(e) => setLng(Number(e.target.value))}
                 />
               </HStack>
+
+              <FormControl>
+                <FormLabel>Delivery Fee (₹)</FormLabel>
+                <Input
+                  placeholder="e.g. 40"
+                  type="number"
+                  value={deliveryFee}
+                  onChange={(e) => setDeliveryFee(e.target.value)}
+                />
+              </FormControl>
             </VStack>
           </ModalBody>
 
@@ -229,7 +278,7 @@ const fetchStores = useCallback(async () => {
               Cancel
             </Button>
             <Button colorScheme="orange" onClick={handleCreate}>
-              Create
+              {editingStore ? "Update" : "Create"}
             </Button>
           </ModalFooter>
         </ModalContent>

@@ -12,6 +12,7 @@ import { useAdminAuth } from "./context/useAdminAuth";
 import Products from "./pages/Products";
 import ProductDetail from "./pages/ProductDetail";
 import Stores from "./pages/Stores";
+import Orders from "./pages/Orders";
 
 // 🔐 Private Route Wrapper
 interface PrivateRouteProps {
@@ -68,13 +69,21 @@ function AppRoutes() {
       />
 
       <Route
-  path="/stores"
-  element={
-    <PrivateRoute>
-      <Stores />
-    </PrivateRoute>
-  }
-/>
+        path="/stores"
+        element={
+          <PrivateRoute>
+            <Stores />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/orders"
+        element={
+          <PrivateRoute>
+            <Orders />
+          </PrivateRoute>
+        }
+      />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" />} />
