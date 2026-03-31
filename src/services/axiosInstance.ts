@@ -1,8 +1,17 @@
 import axios from "axios";
 
+function resolveApiBaseUrl(): string {
+  const fromEnv = import.meta.env.VITE_API_URL?.trim();
+  if (!fromEnv) {
+    throw new Error(
+      "VITE_API_URL is not set. Copy admin/.env.example to admin/.env and set VITE_API_URL (no trailing slash)."
+    );
+  }
+  return fromEnv.replace(/\/$/, "");
+}
+
 const axiosInstance = axios.create({
-  baseURL: "http://192.168.88.30:5000",
-  // baseURL: "http://localhost:5000",
+  baseURL: resolveApiBaseUrl(),
 });
 
 axiosInstance.interceptors.request.use((config) => {

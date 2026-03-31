@@ -1,7 +1,23 @@
 import { Box, VStack, Text, Button } from "@chakra-ui/react";
 import { NavLink } from "react-router-dom";
+import { useAdminAuth } from "../context/useAdminAuth";
 
 export default function Sidebar() {
+  const { hasModule } = useAdminAuth();
+
+  const menuItems: Array<{ label: string; to: string; visible: boolean }> = [
+    { label: "Dashboard", to: "/", visible: true },
+    // Core catalog
+    { label: "Products", to: "/products", visible: hasModule("product") },
+    { label: "Categories", to: "/categories", visible: hasModule("category") },
+    { label: "Stores", to: "/stores", visible: hasModule("store") },
+    // Operations
+    { label: "Orders", to: "/orders", visible: hasModule("order") },
+    // Management
+    { label: "Inventory", to: "/stores", visible: hasModule("inventory") },
+    { label: "Users", to: "/register", visible: hasModule("user") },
+  ];
+
   return (
     <Box
       w="260px"
@@ -16,63 +32,21 @@ export default function Sidebar() {
       </Text>
 
       <VStack align="stretch" spacing={4}>
-        <NavLink to="/">
-          {({ isActive }) => (
-            <Button
-              justifyContent="flex-start"
-              variant={isActive ? "solid" : "ghost"}
-              colorScheme="orange"
-            >
-              Dashboard
-            </Button>
-          )}
-        </NavLink>
-
-        <NavLink to="/categories">
-          {({ isActive }) => (
-            <Button
-              justifyContent="flex-start"
-              variant={isActive ? "solid" : "ghost"}
-              colorScheme="orange"
-            >
-              Categories
-            </Button>
-          )}
-        </NavLink>
-
-        <NavLink to="/products">
-          {({ isActive }) => (
-            <Button
-              justifyContent="flex-start"
-              variant={isActive ? "solid" : "ghost"}
-              colorScheme="orange"
-            >
-              Products
-            </Button>
-          )}
-        </NavLink>
-        <NavLink to="/stores">
-          {({ isActive }) => (
-            <Button
-              justifyContent="flex-start"
-              variant={isActive ? "solid" : "ghost"}
-              colorScheme="orange"
-            >
-              Stores
-            </Button>
-          )}
-        </NavLink>
-        <NavLink to="/orders">
-          {({ isActive }) => (
-            <Button
-              justifyContent="flex-start"
-              variant={isActive ? "solid" : "ghost"}
-              colorScheme="orange"
-            >
-              Orders
-            </Button>
-          )}
-        </NavLink>
+        {menuItems
+          .filter((item) => item.visible)
+          .map((item) => (
+            <NavLink key={item.to} to={item.to}>
+              {({ isActive }) => (
+                <Button
+                  justifyContent="flex-start"
+                  variant={isActive ? "solid" : "ghost"}
+                  colorScheme="orange"
+                >
+                  {item.label}
+                </Button>
+              )}
+            </NavLink>
+          ))}
       </VStack>
     </Box>
   );

@@ -9,7 +9,6 @@ import {
   Text,
   VStack,
   useToast,
-  Link,
 } from "@chakra-ui/react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -39,6 +38,16 @@ export default function Login() {
       await login(trimmedEmail, password);
       navigate("/");
     } catch (err: unknown) {
+      if (err instanceof Error && !(err as { response?: unknown }).response) {
+        toast({
+          title: "Login Failed",
+          description: err.message,
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+        return;
+      }
       const ax = err as {
         response?: {
           data?: {
@@ -105,11 +114,8 @@ export default function Login() {
             Sign In
           </Button>
 
-          <Text textAlign="center" fontSize="sm">
-            New Admin?{" "}
-            <Link color="orange.500" onClick={() => navigate("/register")}>
-              Create Account
-            </Link>
+          <Text textAlign="center" fontSize="sm" color="gray.600">
+            New admins are added by an existing admin after sign-in (Create admin in the sidebar).
           </Text>
         </VStack>
       </Box>
