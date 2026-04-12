@@ -15,6 +15,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axiosInstance from "../services/axiosInstance";
 import axios from "axios";
+import Sidebar from "../components/Sidebar";
+import Header from "../components/Header";
 
 export default function Register() {
   const navigate = useNavigate();
@@ -29,84 +31,114 @@ export default function Register() {
     try {
       setLoading(true);
 
-      await axiosInstance.post("/api/auth/register", {
-        name,
-        email,
+      await axiosInstance.post("/api/admin/create-admin", {
+        name: name.trim(),
+        email: email.trim(),
         password,
-        role: "admin", // Important
       });
 
       toast({
-        title: "Account Created",
-        description: "You can now login",
+        title: "Admin created",
+        description: "The new admin can sign in from the login page.",
         status: "success",
-        duration: 3000,
+        duration: 4000,
       });
 
-      navigate("/login");
+      navigate("/");
     } catch (error: unknown) {
-  if (axios.isAxiosError(error)) {
-    console.log(error.response?.data);
-  }
-} finally {
+      if (axios.isAxiosError(error)) {
+        const data = error.response?.data as {
+          message?: string;
+          detail?: { errors?: Record<string, string[] | string[][]> };
+        };
+        const message = data?.message ?? "Could not create admin";
+        const errs = data?.detail?.errors;
+        const flat =
+          errs &&
+          Object.values(errs)
+            .flat()
+            .filter((x): x is string => typeof x === "string");
+        toast({
+          title: "Failed",
+          description: flat?.length ? flat.join(". ") : message,
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+      } else {
+        toast({
+          title: "Failed",
+          description: error instanceof Error ? error.message : "Unknown error",
+          status: "error",
+        });
+      }
+    } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Flex minH="100vh" align="center" justify="center" bg="gray.100">
-      <Box bg="white" p={10} rounded="xl" shadow="lg" w="400px">
-        <VStack spacing={6} align="stretch">
-          <Heading size="lg" textAlign="center">
-            Create Admin Account
-          </Heading>
+    <Box bg="gray.100" minH="100vh">
+      <Sidebar />
+      <Header />
 
-          <FormControl>
-            <FormLabel>Name</FormLabel>
-            <Input
-              placeholder="Full Name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </FormControl>
+      <Flex ml="260px" mt="70px" p={8} align="center" justify="center" minH="calc(100vh - 70px)">
+        <Box bg="white" p={10} rounded="xl" shadow="lg" w="100%" maxW="420px">
+          <VStack spacing={6} align="stretch">
+            <Heading size="lg" textAlign="center">
+              Create admin user
+            </Heading>
+            <Text fontSize="sm" color="gray.600" textAlign="center">
+              Only existing admins can add admins. Password: 8+ chars, upper & lower case,
+              number, and special character.
+            </Text>
 
-          <FormControl>
-            <FormLabel>Email</FormLabel>
-            <Input
-              type="email"
-              placeholder="admin@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </FormControl>
+            <FormControl>
+              <FormLabel>Name</FormLabel>
+              <Input
+                placeholder="Full name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </FormControl>
 
-          <FormControl>
-            <FormLabel>Password</FormLabel>
-            <Input
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </FormControl>
+            <FormControl>
+              <FormLabel>Email</FormLabel>
+              <Input
+                type="email"
+                placeholder="admin@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </FormControl>
 
-          <Button
-            colorScheme="orange"
-            size="lg"
-            isLoading={loading}
-            onClick={handleRegister}
-          >
-            Create Account
-          </Button>
+            <FormControl>
+              <FormLabel>Password</FormLabel>
+              <Input
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </FormControl>
 
-          <Text textAlign="center" fontSize="sm">
-            Already have an account?{" "}
-            <Link color="orange.500" onClick={() => navigate("/login")}>
-              Sign In
-            </Link>
-          </Text>
-        </VStack>
-      </Box>
-    </Flex>
+            <Button
+              colorScheme="orange"
+              size="lg"
+              isLoading={loading}
+              onClick={handleRegister}
+            >
+              Create admin
+            </Button>
+
+            <Text textAlign="center" fontSize="sm">
+              <Link color="orange.500" onClick={() => navigate("/")}>
+                Back to dashboard
+              </Link>
+            </Text>
+          </VStack>
+        </Box>
+      </Flex>
+    </Box>
   );
 }

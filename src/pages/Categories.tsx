@@ -34,6 +34,7 @@ import axios from "axios";
 import axiosInstance from "../services/axiosInstance";
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
+import { sanitizeText } from "../utils/sanitizeHtml";
 import type { ReactElement } from "react";
 import {
   AddIcon,
@@ -82,7 +83,6 @@ export default function Categories() {
         setCategories(res.data);
       }
     } catch (error) {
-      console.error(error);
     }
   })();
 
@@ -181,7 +181,7 @@ const toggleExpand = (id: string) => {
             )}
             {!hasChildren && <Box w="32px" />}
             <Text fontWeight={level === 0 ? "bold" : "normal"}>
-              {category.name}
+              {sanitizeText(category.name)}
             </Text>
             {hasChildren && (
               <Badge ml={2} colorScheme="blue">
@@ -190,7 +190,7 @@ const toggleExpand = (id: string) => {
             )}
           </Flex>
         </Td>
-        <Td>{category.slug}</Td>
+        <Td>{sanitizeText(category.slug)}</Td>
         <Td>
           {level === 0 ? (
             <Badge colorScheme="green">Parent</Badge>
@@ -293,7 +293,7 @@ const toggleExpand = (id: string) => {
                 >
                   {categories.map((cat) => (
                     <option key={cat._id} value={cat._id}>
-                      {cat.name}
+                      {sanitizeText(cat.name)}
                     </option>
                   ))}
                 </Select>

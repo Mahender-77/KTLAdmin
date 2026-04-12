@@ -25,12 +25,14 @@ import {
   VStack,
   Divider,
   Flex,
+  Link,
 } from "@chakra-ui/react";
 import { SearchIcon } from "@chakra-ui/icons";
 import { useEffect, useState, useCallback } from "react";
 import axiosInstance from "../services/axiosInstance";
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
+import { sanitizeText } from "../utils/sanitizeHtml";
 
 interface User {
   _id: string;
@@ -77,6 +79,27 @@ interface Order {
   createdAt: string;
 }
 
+/** Response from GET /api/orders/admin/:id/tracking (same as customer/delivery tracking payload). */
+interface OrderTrackingPayload {
+  deliveryPerson: { name?: string; phone?: string } | null;
+  location: {
+    latitude: number | null;
+    longitude: number | null;
+    lastUpdated?: string | null;
+  } | null;
+  deliveryStatus: string | null;
+  subOrders?: Array<{
+    _id?: string;
+    deliveryStatus?: string;
+    deliveryBoyId?: { name?: string; phone?: string } | null;
+    deliveryPersonLocation?: {
+      latitude?: number;
+      longitude?: number;
+      lastUpdated?: string;
+    };
+  }>;
+}
+
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString("en-IN", {
     day: "2-digit",
@@ -85,6 +108,38 @@ function formatDate(d: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** Matches PATCH /api/orders/:id/status body */
+type ApiOrderStatus = "confirmed" | "out_for_delivery" | "delivered" | "cancelled";
+
+function dbStatusToDraft(db: string): ApiOrderStatus {
+  switch (db) {
+    case "shipped":
+      return "out_for_delivery";
+    case "delivered":
+      return "delivered";
+    case "cancelled":
+      return "cancelled";
+    case "placed":
+    default:
+      return "confirmed";
+  }
+}
+
+function apiStatusToDbLabel(api: ApiOrderStatus): string {
+  switch (api) {
+    case "confirmed":
+      return "placed";
+    case "out_for_delivery":
+      return "shipped";
+    case "delivered":
+      return "delivered";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return "placed";
+  }
 }
 
 export default function Orders() {
@@ -99,7 +154,26 @@ export default function Orders() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [statusDraft, setStatusDraft] = useState<ApiOrderStatus>("confirmed");
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [trackingData, setTrackingData] = useState<OrderTrackingPayload | null>(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+  const [trackingError, setTrackingError] = useState<string | null>(null);
   const limit = 20;
+
+  const fetchOrderTracking = useCallback(async (orderId: string) => {
+    setTrackingLoading(true);
+    setTrackingError(null);
+    try {
+      const res = await axiosInstance.get<OrderTrackingPayload>(`/api/orders/admin/${orderId}/tracking`);
+      setTrackingData(res.data ?? null);
+    } catch {
+      setTrackingData(null);
+      setTrackingError("Could not load live tracking. Try Refresh, or confirm this order belongs to your organization.");
+    } finally {
+      setTrackingLoading(false);
+    }
+  }, []);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -112,7 +186,6 @@ export default function Orders() {
       setTotal(res.data?.total ?? 0);
       setTotalPages(res.data?.totalPages ?? 1);
     } catch (e) {
-      console.error(e);
       toast({ title: "Error loading orders", status: "error", duration: 3000 });
       setOrders([]);
     } finally {
@@ -124,16 +197,54 @@ export default function Orders() {
     fetchOrders();
   }, [fetchOrders]);
 
+  useEffect(() => {
+    if (selectedOrder) {
+      setStatusDraft(dbStatusToDraft(selectedOrder.orderStatus));
+    }
+  }, [selectedOrder]);
+
+  useEffect(() => {
+    if (!selectedOrder) {
+      setTrackingData(null);
+      setTrackingError(null);
+      return;
+    }
+    void fetchOrderTracking(selectedOrder._id);
+  }, [selectedOrder, fetchOrderTracking]);
+
   const handleViewDetails = async (order: Order) => {
     try {
       setDetailLoading(true);
       const res = await axiosInstance.get(`/api/orders/admin/${order._id}`);
       setSelectedOrder(res.data);
     } catch (e) {
-      console.error(e);
       toast({ title: "Error loading order details", status: "error", duration: 3000 });
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const handlePatchOrderStatus = async () => {
+    if (!selectedOrder) return;
+    setStatusSaving(true);
+    try {
+      await axiosInstance.patch(`/api/orders/${selectedOrder._id}/status`, {
+        status: statusDraft,
+      });
+      const nextDb = apiStatusToDbLabel(statusDraft);
+      setSelectedOrder({ ...selectedOrder, orderStatus: nextDb });
+      toast({
+        title: "Order status updated",
+        description: "Customer will receive a push notification.",
+        status: "success",
+        duration: 4000,
+      });
+      await fetchOrders();
+      void fetchOrderTracking(selectedOrder._id);
+    } catch {
+      toast({ title: "Could not update order status", status: "error", duration: 4000 });
+    } finally {
+      setStatusSaving(false);
     }
   };
 
@@ -232,24 +343,24 @@ export default function Orders() {
                       </Text>
                     </Td>
                     <Td>
-                      <Text fontWeight="600">{order.user?.name ?? "-"}</Text>
-                      <Text fontSize="xs" color="gray.500">{order.user?.email ?? ""}</Text>
+                      <Text fontWeight="600">{sanitizeText(order.user?.name ?? "-")}</Text>
+                      <Text fontSize="xs" color="gray.500">{sanitizeText(order.user?.email ?? "")}</Text>
                     </Td>
                     <Td fontSize="sm">{formatDate(order.createdAt)}</Td>
                     <Td fontWeight="600">Rs.{Number(order.totalAmount || 0).toLocaleString()}</Td>
                     <Td>
                       <Badge colorScheme={paymentColor(order.paymentStatus ?? "")}>
-                        {order.paymentStatus ?? "-"}
+                        {sanitizeText(order.paymentStatus ?? "-")}
                       </Badge>
                     </Td>
                     <Td>
                       <Badge colorScheme={statusColor(order.orderStatus ?? "")}>
-                        {order.orderStatus ?? "-"}
+                        {sanitizeText(order.orderStatus ?? "-")}
                       </Badge>
                     </Td>
                     <Td>
                       {order.deliveryPerson?.name ? (
-                        <Text fontSize="sm">{order.deliveryPerson.name}</Text>
+                        <Text fontSize="sm">{sanitizeText(order.deliveryPerson.name)}</Text>
                       ) : (
                         <Text fontSize="sm" color="gray.400">-</Text>
                       )}
@@ -296,36 +407,77 @@ export default function Orders() {
               <VStack align="stretch" spacing={4}>
                 <Flex justify="space-between" wrap="wrap" gap={2}>
                   <Badge colorScheme={statusColor(selectedOrder.orderStatus ?? "")}>
-                    {selectedOrder.orderStatus}
+                    {sanitizeText(selectedOrder.orderStatus ?? "-")}
                   </Badge>
                   <Badge colorScheme={paymentColor(selectedOrder.paymentStatus ?? "")}>
-                    {selectedOrder.paymentStatus}
+                    {sanitizeText(selectedOrder.paymentStatus ?? "-")}
                   </Badge>
                 </Flex>
 
+                <Box borderWidth="1px" borderColor="gray.200" rounded="md" p={4} bg="gray.50">
+                  <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={2}>
+                    UPDATE ORDER STATUS (NOTIFIES CUSTOMER)
+                  </Text>
+                  <Text fontSize="sm" color="gray.600" mb={3}>
+                    Same organization as this admin account. Delivery progress per category appears below; delivery
+                    partners use the courier app for pickup and transit.
+                  </Text>
+                  <HStack spacing={3} flexWrap="wrap" align="flex-end">
+                    <Box minW="220px">
+                      <Text fontSize="xs" mb={1} color="gray.500">
+                        New status
+                      </Text>
+                      <Select
+                        size="sm"
+                        bg="white"
+                        value={statusDraft}
+                        onChange={(e) => setStatusDraft(e.target.value as ApiOrderStatus)}
+                      >
+                        <option value="confirmed">Confirmed — preparing</option>
+                        <option value="out_for_delivery">Out for delivery</option>
+                        <option value="delivered">Delivered</option>
+                        <option value="cancelled">Cancelled</option>
+                      </Select>
+                    </Box>
+                    <Button
+                      size="sm"
+                      colorScheme="orange"
+                      isLoading={statusSaving}
+                      loadingText="Saving"
+                      onClick={() => void handlePatchOrderStatus()}
+                    >
+                      {"Save & notify"}
+                    </Button>
+                  </HStack>
+                </Box>
+
                 <Box>
                   <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={1}>CUSTOMER</Text>
-                  <Text fontWeight="600">{selectedOrder.user?.name ?? "-"}</Text>
-                  <Text fontSize="sm" color="gray.600">{selectedOrder.user?.email ?? ""}</Text>
-                  <Text fontSize="sm" color="gray.600">{selectedOrder.user?.phone ?? ""}</Text>
+                  <Text fontWeight="600">{sanitizeText(selectedOrder.user?.name ?? "-")}</Text>
+                  <Text fontSize="sm" color="gray.600">{sanitizeText(selectedOrder.user?.email ?? "")}</Text>
+                  <Text fontSize="sm" color="gray.600">{sanitizeText(selectedOrder.user?.phone ?? "")}</Text>
                 </Box>
 
                 {selectedOrder.address && (
                   <Box>
                     <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={1}>DELIVERY ADDRESS</Text>
-                    <Text>{selectedOrder.address.name}</Text>
-                    <Text fontSize="sm">{selectedOrder.address.address}</Text>
-                    <Text fontSize="sm">{selectedOrder.address.city}, {selectedOrder.address.pincode}</Text>
-                    <Text fontSize="sm">Phone: {selectedOrder.address.phone}</Text>
+                    <Text>{sanitizeText(selectedOrder.address.name)}</Text>
+                    <Text fontSize="sm">{sanitizeText(selectedOrder.address.address)}</Text>
+                    <Text fontSize="sm">
+                      {sanitizeText(selectedOrder.address.city)}, {sanitizeText(selectedOrder.address.pincode)}
+                    </Text>
+                    <Text fontSize="sm">
+                      Phone: {sanitizeText(selectedOrder.address.phone)}
+                    </Text>
                   </Box>
                 )}
 
                 {selectedOrder.deliveryPerson && (
                   <Box>
                     <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={1}>DELIVERED BY</Text>
-                    <Text>{selectedOrder.deliveryPerson.name}</Text>
-                    <Text fontSize="sm" color="gray.600">{selectedOrder.deliveryPerson.email}</Text>
-                    <Text fontSize="sm" color="gray.600">{selectedOrder.deliveryPerson.phone}</Text>
+                    <Text>{sanitizeText(selectedOrder.deliveryPerson.name)}</Text>
+                    <Text fontSize="sm" color="gray.600">{sanitizeText(selectedOrder.deliveryPerson.email)}</Text>
+                    <Text fontSize="sm" color="gray.600">{sanitizeText(selectedOrder.deliveryPerson.phone)}</Text>
                   </Box>
                 )}
 
@@ -336,7 +488,7 @@ export default function Orders() {
                   <VStack align="stretch" spacing={2}>
                     {(selectedOrder.items ?? []).map((item: OrderItem, i: number) => (
                       <Flex key={i} justify="space-between" p={2} bg="gray.50" rounded="md" fontSize="sm">
-                        <Text fontWeight="600">{item.product?.name ?? "Product"}</Text>
+                        <Text fontWeight="600">{sanitizeText(item.product?.name ?? "Product")}</Text>
                         <Text>
                           {item.quantity} x Rs.{Number(item.price).toLocaleString()} = Rs.
                           {(item.quantity * Number(item.price)).toLocaleString()}
@@ -350,14 +502,16 @@ export default function Orders() {
                   <Box>
                     <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={2}>BY CATEGORY</Text>
                     <VStack align="stretch" spacing={2}>
-                      {selectedOrder.subOrders.map((sub: SubOrder) => (
+                      {(selectedOrder.subOrders ?? []).map((sub: SubOrder) => (
                         <Box key={sub._id} p={3} bg="gray.50" rounded="md" borderWidth="1px" borderColor="gray.200">
                           <Flex justify="space-between" mb={2}>
-                            <Text fontWeight="600">{sub.categoryName}</Text>
-                            <Badge fontSize="xs">{sub.deliveryStatus}</Badge>
+                            <Text fontWeight="600">{sanitizeText(sub.categoryName)}</Text>
+                            <Badge fontSize="xs">{sanitizeText(sub.deliveryStatus)}</Badge>
                           </Flex>
                           {sub.deliveryBoyId && (
-                            <Text fontSize="xs" color="gray.600">Delivery: {sub.deliveryBoyId.name}</Text>
+                            <Text fontSize="xs" color="gray.600">
+                              Delivery: {sanitizeText(sub.deliveryBoyId.name)}
+                            </Text>
                           )}
                           <Text fontSize="sm">Subtotal: Rs.{Number(sub.totalAmount).toLocaleString()}</Text>
                         </Box>
@@ -365,6 +519,123 @@ export default function Orders() {
                     </VStack>
                   </Box>
                 )}
+
+                <Box borderWidth="1px" borderColor="blue.200" rounded="md" p={4} bg="blue.50">
+                  <Flex justify="space-between" align="center" mb={2} flexWrap="wrap" gap={2}>
+                    <Text fontSize="xs" fontWeight="bold" color="blue.800">
+                      LIVE TRACKING (READ-ONLY — SAME DATA AS CUSTOMER APP)
+                    </Text>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      colorScheme="blue"
+                      isLoading={trackingLoading}
+                      onClick={() => selectedOrder && void fetchOrderTracking(selectedOrder._id)}
+                    >
+                      Refresh
+                    </Button>
+                  </Flex>
+                  <Text fontSize="sm" color="gray.700" mb={3}>
+                    Courier location and sub-order statuses update as the delivery partner uses the courier app.
+                  </Text>
+                  {trackingError && (
+                    <Text fontSize="sm" color="red.600" mb={2}>
+                      {trackingError}
+                    </Text>
+                  )}
+                  {trackingLoading && !trackingData ? (
+                    <Text fontSize="sm" color="gray.600">Loading tracking…</Text>
+                  ) : trackingData ? (
+                    <VStack align="stretch" spacing={3}>
+                      {(trackingData.deliveryPerson?.name || trackingData.deliveryPerson?.phone) && (
+                        <Box>
+                          <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={1}>ASSIGNED COURIER (ORDER)</Text>
+                          <Text fontSize="sm">
+                            {sanitizeText(trackingData.deliveryPerson?.name ?? "—")}
+                            {trackingData.deliveryPerson?.phone
+                              ? ` · ${sanitizeText(trackingData.deliveryPerson.phone)}`
+                              : ""}
+                          </Text>
+                        </Box>
+                      )}
+                      {trackingData.deliveryStatus && (
+                        <Text fontSize="sm">
+                          <Text as="span" fontWeight="600">Order delivery status: </Text>
+                          {sanitizeText(trackingData.deliveryStatus)}
+                        </Text>
+                      )}
+                      {trackingData.location?.latitude != null &&
+                      trackingData.location?.longitude != null &&
+                      !Number.isNaN(Number(trackingData.location.latitude)) &&
+                      !Number.isNaN(Number(trackingData.location.longitude)) ? (
+                        <Box>
+                          <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={1}>LAST KNOWN LOCATION</Text>
+                          <Text fontSize="xs" fontFamily="mono" color="gray.800">
+                            {Number(trackingData.location.latitude).toFixed(6)},{" "}
+                            {Number(trackingData.location.longitude).toFixed(6)}
+                          </Text>
+                          {trackingData.location.lastUpdated && (
+                            <Text fontSize="xs" color="gray.500" mt={1}>
+                              Updated: {formatDate(trackingData.location.lastUpdated)}
+                            </Text>
+                          )}
+                          <Link
+                            href={`https://www.google.com/maps?q=${trackingData.location.latitude},${trackingData.location.longitude}`}
+                            isExternal
+                            color="blue.600"
+                            fontSize="sm"
+                            fontWeight="600"
+                            mt={2}
+                            display="inline-block"
+                          >
+                            Open in Google Maps
+                          </Link>
+                        </Box>
+                      ) : (
+                        <Text fontSize="sm" color="gray.600">
+                          No GPS ping yet (courier may not have started or location not shared).
+                        </Text>
+                      )}
+                      {(trackingData.subOrders ?? []).length > 0 && (
+                        <Box>
+                          <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={2}>
+                            SUB-ORDERS (PER CATEGORY — COURIER STATUS)
+                          </Text>
+                          <VStack align="stretch" spacing={2}>
+                            {(trackingData.subOrders ?? []).map((s, idx) => (
+                              <Flex
+                                key={s._id ?? idx}
+                                justify="space-between"
+                                align="center"
+                                p={2}
+                                bg="white"
+                                rounded="md"
+                                borderWidth="1px"
+                                borderColor="blue.100"
+                                flexWrap="wrap"
+                                gap={2}
+                              >
+                                <VStack align="start" spacing={0}>
+                                  <Text fontSize="sm" fontWeight="600">
+                                    {sanitizeText(s.deliveryBoyId?.name ?? "Unassigned")}
+                                  </Text>
+                                  {s.deliveryBoyId?.phone && (
+                                    <Text fontSize="xs" color="gray.600">
+                                      {sanitizeText(s.deliveryBoyId.phone)}
+                                    </Text>
+                                  )}
+                                </VStack>
+                                <Badge colorScheme="blue">{sanitizeText(s.deliveryStatus ?? "—")}</Badge>
+                              </Flex>
+                            ))}
+                          </VStack>
+                        </Box>
+                      )}
+                    </VStack>
+                  ) : (
+                    <Text fontSize="sm" color="gray.600">Tracking unavailable.</Text>
+                  )}
+                </Box>
 
                 <Flex justify="flex-end" pt={2}>
                   <Text fontSize="lg" fontWeight="800" color="orange.500">

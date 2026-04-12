@@ -33,6 +33,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import axiosInstance from "../services/axiosInstance";
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
+import { sanitizeText } from "../utils/sanitizeHtml";
 
 const EXPIRING_SOON_DAYS = 7;
 
@@ -124,7 +125,6 @@ export default function ProductDetail() {
       const res = await axiosInstance.get(`/api/products/${id}`);
       setProduct(res.data);
     } catch (error) {
-      console.error("Error loading product:", error);
       toast({
         title: "Product not found",
         status: "error",
@@ -153,7 +153,9 @@ export default function ProductDetail() {
   const variantOptions = useMemo(() => product?.variants ?? [], [product]);
   const batches = useMemo(() => product?.inventoryBatches ?? [], [product]);
 
-  const pricingMode = product?.pricingMode ?? product?.pricingType === "dynamic" ? "unit" : "fixed";
+  const pricingMode =
+    product?.pricingMode ??
+    (product?.pricingType === "dynamic" ? "unit" : "fixed");
   const isFixed = pricingMode === "fixed";
   const hasExpiry = product?.hasExpiry === true;
   const baseUnit = product?.baseUnit ?? "pcs";
@@ -277,10 +279,10 @@ export default function ProductDetail() {
   };
 
   const getStoreName = (store: Store | string) =>
-    typeof store === "object" && store?.name ? store.name : "—";
+    typeof store === "object" && store?.name ? sanitizeText(store.name) : "—";
   const getVariantLabel = (variantIdStr: string) => {
     const v = variantOptions.find((x) => x._id === variantIdStr);
-    return v ? `${v.value} ${v.unit}` : "—";
+    return v ? `${v.value} ${sanitizeText(v.unit)}` : "—";
   };
 
   if (loading || !product) {
@@ -312,15 +314,17 @@ export default function ProductDetail() {
 
         <Flex justify="space-between" align="center" mb={6}>
           <VStack align="flex-start" spacing={0}>
-            <Heading size="lg">{product.name}</Heading>
-            <Text color="gray.600">{product.category?.name}</Text>
+            <Heading size="lg">{sanitizeText(product.name)}</Heading>
+            <Text color="gray.600">
+              {sanitizeText(product.category?.name)}
+            </Text>
             <HStack mt={2} spacing={3}>
               <Badge colorScheme={isFixed ? "gray" : "blue"}>
                 {isFixed ? "Fixed" : pricingMode === "custom-weight" ? "Custom weight" : "Unit"}
               </Badge>
               {!isFixed && (
                 <Text fontSize="sm" color="gray.600">
-                  ₹{product.pricePerUnit ?? "—"} / {product.baseUnit ?? "—"}
+                  ₹{product.pricePerUnit ?? "—"} / {sanitizeText(product.baseUnit ?? "—")}
                 </Text>
               )}
               {hasExpiry && (
@@ -342,7 +346,7 @@ export default function ProductDetail() {
               <Tr>
                 <Th>Store</Th>
                 {isFixed ? <Th>Variant</Th> : null}
-                <Th isNumeric>Quantity ({baseUnit})</Th>
+                <Th isNumeric>Quantity ({sanitizeText(baseUnit)})</Th>
                 {hasExpiry ? <Th>Expiry date</Th> : null}
                 {hasExpiry ? <Th>Status</Th> : null}
               </Tr>
@@ -413,7 +417,7 @@ export default function ProductDetail() {
                 >
                   {stores.map((s) => (
                     <option key={s._id} value={s._id}>
-                      {s.name}
+                      {sanitizeText(s.name)}
                     </option>
                   ))}
                 </Select>
@@ -429,7 +433,7 @@ export default function ProductDetail() {
                   >
                     {variantOptions.map((v) => (
                       <option key={v._id} value={v._id}>
-                        {v.value} {v.unit}
+                        {v.value} {sanitizeText(v.unit)}
                       </option>
                     ))}
                   </Select>
@@ -437,7 +441,7 @@ export default function ProductDetail() {
               )}
 
               <FormControl isRequired>
-                <FormLabel>Quantity (in {baseUnit})</FormLabel>
+                <FormLabel>Quantity (in {sanitizeText(baseUnit)})</FormLabel>
                 <Input
                   type="number"
                   min={isPcs ? 1 : 0.001}
