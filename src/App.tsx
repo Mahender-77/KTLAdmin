@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { Center, Spinner } from "@chakra-ui/react";
 
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Categories from "./pages/Categories";
@@ -18,6 +20,15 @@ import Products from "./pages/Products";
 import ProductDetail from "./pages/ProductDetail";
 import Stores from "./pages/Stores";
 import Orders from "./pages/Orders";
+import SuperAdminRoute from "./components/SuperAdminRoute";
+import Tenants from "./pages/SuperAdmin/Tenants";
+import TenantDetail from "./pages/SuperAdmin/TenantDetail";
+import CreateTenant from "./pages/SuperAdmin/CreateTenant";
+import AuditLogs from "./pages/SuperAdmin/AuditLogs";
+import Users from "./pages/SuperAdmin/Users";
+import UserDetail from "./pages/SuperAdmin/UserDetail";
+import Inventory from "./pages/Inventory";
+import TenantAuditEntries from "./pages/TenantAuditEntries";
 
 interface PrivateRouteProps {
   children: ReactNode;
@@ -56,6 +67,8 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<GuestOnlyRoute><Login /></GuestOnlyRoute>} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route
         path="/register"
         element={
@@ -159,6 +172,72 @@ function AppRoutes() {
           <PrivateRoute>
             <Orders />
           </PrivateRoute>
+        }
+      />
+
+      <Route
+        path="/inventory"
+        element={
+          <PrivateRoute>
+            <Inventory />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/audit-entries"
+        element={
+          <PrivateRoute>
+            <TenantAuditEntries />
+          </PrivateRoute>
+        }
+      />
+
+      <Route
+        path="/super-admin/tenants"
+        element={
+          <SuperAdminRoute>
+            <Tenants />
+          </SuperAdminRoute>
+        }
+      />
+      <Route
+        path="/super-admin/tenants/create"
+        element={
+          <SuperAdminRoute>
+            <CreateTenant />
+          </SuperAdminRoute>
+        }
+      />
+      <Route
+        path="/super-admin/tenants/:id"
+        element={
+          <SuperAdminRoute>
+            <TenantDetail />
+          </SuperAdminRoute>
+        }
+      />
+      <Route
+        path="/super-admin/audit-logs"
+        element={
+          <SuperAdminRoute>
+            <AuditLogs />
+          </SuperAdminRoute>
+        }
+      />
+      <Route
+        path="/super-admin/users"
+        element={
+          <SuperAdminRoute>
+            <Users />
+          </SuperAdminRoute>
+        }
+      />
+      <Route
+        path="/super-admin/users/:id"
+        element={
+          <SuperAdminRoute>
+            <UserDetail />
+          </SuperAdminRoute>
         }
       />
 

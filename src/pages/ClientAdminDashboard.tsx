@@ -61,7 +61,6 @@ export default function ClientAdminDashboard() {
         setInventoryCount(totalInventory);
       })
       .catch((err: any) => {
-        console.error(err);
         if (!mounted) return;
         toast({
           title: "Unable to load dashboard stats",

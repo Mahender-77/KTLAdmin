@@ -16,15 +16,15 @@ import {
 } from "@chakra-ui/react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import Header from "../components/Header";
-import Sidebar from "../components/Sidebar";
-import axiosInstance from "../services/axiosInstance";
-import { colors } from "../../../Ktl/constants/colors";
+import Header from "../../components/Header";
+import Sidebar from "../../components/Sidebar";
+import axiosInstance from "../../services/axiosInstance";
+import { colors } from "../../../../Ktl/constants/colors";
 import {
   ADMIN_MODULES,
   ADMIN_MODULE_DEFINITIONS,
   ADMIN_MODULE_GROUP_LABELS,
-} from "../constants/modules";
+} from "../../constants/modules";
 
 const DEFAULT_MODULES = [
   ADMIN_MODULES.PRODUCT,
@@ -45,7 +45,7 @@ const PRODUCT_FIELD_OPTIONS = [
   "maxOrderQty",
 ];
 
-export default function CreateOrganization() {
+export default function CreateTenant() {
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -53,12 +53,10 @@ export default function CreateOrganization() {
   const [adminName, setAdminName] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [adminPassword, setAdminPassword] = useState("ChangeMe@123");
-  const [modules, setModules] = useState([...DEFAULT_MODULES]);
-  const [productFields, setProductFields] = useState([...PRODUCT_FIELD_OPTIONS]);
+  const [modules, setModules] = useState<string[]>([...DEFAULT_MODULES]);
+  const [productFields, setProductFields] = useState<string[]>([...PRODUCT_FIELD_OPTIONS]);
   const [submitting, setSubmitting] = useState(false);
 
-  // Chakra's CheckboxGroup can sometimes deliver a single string depending on usage.
-  // The backend Zod schema requires `modules` and productFields selections to be arrays.
   const normalizedModules = Array.isArray(modules) ? modules : modules ? [modules] : [];
   const normalizedProductFields = Array.isArray(productFields)
     ? productFields
@@ -68,7 +66,7 @@ export default function CreateOrganization() {
 
   const productFieldsPayload = useMemo(
     () =>
-      PRODUCT_FIELD_OPTIONS.reduce((acc, key) => {
+      PRODUCT_FIELD_OPTIONS.reduce<Record<string, boolean>>((acc, key) => {
         acc[key] = normalizedProductFields.includes(key);
         return acc;
       }, {}),
@@ -87,7 +85,7 @@ export default function CreateOrganization() {
 
     setSubmitting(true);
     try {
-      await axiosInstance.post("/api/super-admin/create-organization-full", {
+      const res = await axiosInstance.post("/api/super-admin/create-organization-full", {
         organization: { name: organizationName.trim() },
         admin: {
           name: adminName.trim(),
@@ -98,15 +96,21 @@ export default function CreateOrganization() {
         productFields: productFieldsPayload,
       });
 
+      const orgId = res.data?.organization?._id;
       toast({
-        title: "Organization created successfully",
+        title: "Tenant created",
         status: "success",
         duration: 3000,
       });
-      navigate("/organizations");
-    } catch (err) {
+      if (orgId) {
+        navigate(`/super-admin/tenants/${orgId}`);
+      } else {
+        navigate("/super-admin/tenants");
+      }
+    } catch (err: unknown) {
       const message =
-        err?.response?.data?.message || "Failed to create organization. Please try again.";
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+        "Failed to create tenant.";
       toast({ title: message, status: "error", duration: 5000 });
     } finally {
       setSubmitting(false);
@@ -120,19 +124,19 @@ export default function CreateOrganization() {
 
       <Box ml="260px" mt="70px" p={8}>
         <Heading size="lg" color={colors.textPrimary} mb={2}>
-          Create Organization
+          Create tenant
         </Heading>
         <Text color={colors.textMuted} mb={6}>
-          Create a client organization with admin account, modules, and product field controls in one step.
+          Create a client organization with admin account, modules, and product field controls.
         </Text>
 
         <Grid templateColumns="repeat(2, 1fr)" gap={6}>
           <GridItem colSpan={2} bg="white" border="1px solid" borderColor={colors.border} p={6} rounded="lg">
             <Heading size="sm" mb={4} color={colors.textSecondary}>
-              SECTION 1: Organization Info
+              Organization
             </Heading>
             <FormControl isRequired>
-              <FormLabel>Organization Name</FormLabel>
+              <FormLabel>Name</FormLabel>
               <Input
                 placeholder="e.g. Acme Retail Pvt Ltd"
                 value={organizationName}
@@ -143,7 +147,7 @@ export default function CreateOrganization() {
 
           <GridItem bg="white" border="1px solid" borderColor={colors.border} p={6} rounded="lg">
             <Heading size="sm" mb={4} color={colors.textSecondary}>
-              SECTION 2: Admin Credentials
+              Admin credentials
             </Heading>
             <Stack spacing={4}>
               <FormControl isRequired>
@@ -161,18 +165,15 @@ export default function CreateOrganization() {
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
                 />
-                <Text mt={1} fontSize="xs" color={colors.textMuted}>
-                  Default password can be changed later by the client admin.
-                </Text>
               </FormControl>
             </Stack>
           </GridItem>
 
           <GridItem bg="white" border="1px solid" borderColor={colors.border} p={6} rounded="lg">
             <Heading size="sm" mb={4} color={colors.textSecondary}>
-              SECTION 3: Modules
+              Modules
             </Heading>
-            <CheckboxGroup value={modules} onChange={(v) => setModules(v)}>
+            <CheckboxGroup value={modules} onChange={(v) => setModules(v as string[])}>
               <Stack spacing={4}>
                 {Object.entries(ADMIN_MODULE_GROUP_LABELS).map(([groupId, groupLabel]) => {
                   const groupedModules = ADMIN_MODULE_DEFINITIONS.filter(
@@ -200,9 +201,9 @@ export default function CreateOrganization() {
 
           <GridItem colSpan={2} bg="white" border="1px solid" borderColor={colors.border} p={6} rounded="lg">
             <Heading size="sm" mb={4} color={colors.textSecondary}>
-              SECTION 4: Product Field Control
+              Product field visibility
             </Heading>
-            <CheckboxGroup value={productFields} onChange={(v) => setProductFields(v)}>
+            <CheckboxGroup value={productFields} onChange={(v) => setProductFields(v as string[])}>
               <Grid templateColumns="repeat(3, 1fr)" gap={2}>
                 {PRODUCT_FIELD_OPTIONS.map((field) => (
                   <Checkbox key={field} value={field}>
@@ -215,7 +216,7 @@ export default function CreateOrganization() {
         </Grid>
 
         <Box mt={6} display="flex" gap={3}>
-          <Button variant="outline" onClick={() => navigate("/organizations")}>
+          <Button variant="outline" onClick={() => navigate("/super-admin/tenants")}>
             Cancel
           </Button>
           <Button
@@ -223,13 +224,12 @@ export default function CreateOrganization() {
             color="white"
             _hover={{ bg: colors.primaryDark }}
             isLoading={submitting}
-            onClick={handleSubmit}
+            onClick={() => void handleSubmit()}
           >
-            Create Organization
+            Create tenant
           </Button>
         </Box>
       </Box>
     </Box>
   );
 }
-

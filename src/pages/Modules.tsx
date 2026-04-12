@@ -17,6 +17,7 @@ import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
 import { colors } from "../../../Ktl/constants/colors";
 import axiosInstance from "../services/axiosInstance";
+import { sanitizeText } from "../utils/sanitizeHtml";
 import {
   ADMIN_MODULE_DEFINITIONS,
   ADMIN_MODULE_GROUP_LABELS,
@@ -64,7 +65,6 @@ export default function Modules() {
       })
       .catch((err) => {
         if (!mounted) return;
-        console.error(err);
         toast({
           title: "Failed to load organizations",
           description: err?.response?.data?.message ?? "Please try again.",
@@ -145,7 +145,6 @@ export default function Modules() {
         isClosable: true,
       });
     } catch (err: any) {
-      console.error(err);
       toast({
         title: "Failed to update modules",
         description: err?.response?.data?.message ?? "Please try again.",
@@ -233,7 +232,7 @@ export default function Modules() {
                   >
                     {organizations.map((org) => (
                       <option key={org._id} value={org._id}>
-                        {org.name}
+                        {sanitizeText(org.name)}
                       </option>
                     ))}
                   </Select>
@@ -254,7 +253,7 @@ export default function Modules() {
                     )}
                     {selectedOrg.subscriptionStatus && (
                       <Badge colorScheme="blue" variant="subtle">
-                        {selectedOrg.subscriptionStatus}
+                        {sanitizeText(selectedOrg.subscriptionStatus)}
                       </Badge>
                     )}
                   </Flex>

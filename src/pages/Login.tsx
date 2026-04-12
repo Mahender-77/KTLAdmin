@@ -6,12 +6,17 @@ import {
   FormLabel,
   Heading,
   Input,
+  InputGroup,
+  InputRightElement,
+  IconButton,
   Text,
   VStack,
   useToast,
+  Link,
 } from "@chakra-ui/react";
+import { ViewIcon, ViewOffIcon } from "@chakra-ui/icons";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link as RouterLink } from "react-router-dom";
 import { useAdminAuth } from "../context/useAdminAuth";
 
 export default function Login() {
@@ -21,6 +26,7 @@ export default function Login() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
@@ -97,13 +103,31 @@ export default function Login() {
 
           <FormControl>
             <FormLabel>Password</FormLabel>
-            <Input
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <InputGroup>
+              <Input
+                type={showPassword ? "text" : "password"}
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+              />
+              <InputRightElement>
+                <IconButton
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  size="sm"
+                  variant="ghost"
+                  icon={showPassword ? <ViewOffIcon /> : <ViewIcon />}
+                  onClick={() => setShowPassword((v) => !v)}
+                />
+              </InputRightElement>
+            </InputGroup>
           </FormControl>
+
+          <Text fontSize="sm" textAlign="right">
+            <Link as={RouterLink} to="/forgot-password" color="orange.500" fontWeight="600">
+              Forgot password?
+            </Link>
+          </Text>
 
           <Button
             colorScheme="orange"

@@ -1,6 +1,8 @@
-import { useState, useEffect, type ReactNode } from "react";
-import axiosInstance from "../services/axiosInstance";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
+import axiosInstance, { initCsrfToken, setSessionInvalidatedHandler } from "../services/axiosInstance";
 import { AdminAuthContext } from "./adminAuth.context";
+
+const REFRESH_KEY = "adminRefreshToken";
 
 interface Props {
   children: ReactNode;
@@ -17,15 +19,50 @@ export const AdminAuthProvider = ({ children }: Props) => {
     isSuperAdmin?: boolean;
   } | null>(null);
   const [modules, setModules] = useState<string[]>([]);
+  const [organizationName, setOrganizationName] = useState("");
   const [permissions, setPermissions] = useState<string[]>([]);
   const [productFields, setProductFields] = useState<Record<string, boolean>>({});
 
   const applyAccessData = (payload: any) => {
-    setUser(payload?.user ?? null);
+    const nextUser = payload?.user ?? null;
+    setUser(nextUser);
+    const orgId = nextUser?.organizationId ?? null;
+    if (typeof orgId === "string" && orgId.length > 0) {
+      localStorage.setItem("adminOrganizationId", orgId);
+    } else {
+      localStorage.removeItem("adminOrganizationId");
+    }
     setModules(Array.isArray(payload?.organization?.modules) ? payload.organization.modules : []);
+    setOrganizationName(
+      typeof payload?.organization?.name === "string" ? payload.organization.name : ""
+    );
     setPermissions(Array.isArray(payload?.permissions) ? payload.permissions : []);
     setProductFields(payload?.productFields ?? {});
   };
+
+  const logout = useCallback(() => {
+    localStorage.removeItem("adminToken");
+    localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem("adminOrganizationId");
+    delete axiosInstance.defaults.headers.common["Authorization"];
+    setIsAuthenticated(false);
+    setUser(null);
+    setModules([]);
+    setOrganizationName("");
+    setPermissions([]);
+    setProductFields({});
+  }, []);
+
+  useEffect(() => {
+    setSessionInvalidatedHandler(() => {
+      logout();
+    });
+    return () => setSessionInvalidatedHandler(null);
+  }, [logout]);
+
+  useEffect(() => {
+    void initCsrfToken();
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem("adminToken");
@@ -34,6 +71,7 @@ export const AdminAuthProvider = ({ children }: Props) => {
       return;
     }
     axiosInstance.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+
     axiosInstance
       .get("/api/auth/me")
       .then((res) => {
@@ -42,18 +80,22 @@ export const AdminAuthProvider = ({ children }: Props) => {
           applyAccessData(res.data);
         } else {
           localStorage.removeItem("adminToken");
+          localStorage.removeItem(REFRESH_KEY);
           delete axiosInstance.defaults.headers.common["Authorization"];
           setUser(null);
           setModules([]);
+          setOrganizationName("");
           setPermissions([]);
           setProductFields({});
         }
       })
       .catch(() => {
         localStorage.removeItem("adminToken");
+        localStorage.removeItem(REFRESH_KEY);
         delete axiosInstance.defaults.headers.common["Authorization"];
         setUser(null);
         setModules([]);
+        setOrganizationName("");
         setPermissions([]);
         setProductFields({});
       })
@@ -69,27 +111,24 @@ export const AdminAuthProvider = ({ children }: Props) => {
 
     const token = res.data?.accessToken;
     if (!token) throw new Error("No token received");
+    const refreshTok = res.data?.refreshToken;
     localStorage.setItem("adminToken", token);
+    if (typeof refreshTok === "string" && refreshTok.length > 0) {
+      localStorage.setItem(REFRESH_KEY, refreshTok);
+    } else {
+      localStorage.removeItem(REFRESH_KEY);
+    }
     axiosInstance.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
     const me = await axiosInstance.get("/api/auth/me");
     if (me.data?.user?.role !== "admin" && me.data?.user?.isSuperAdmin !== true) {
       localStorage.removeItem("adminToken");
+      localStorage.removeItem(REFRESH_KEY);
       delete axiosInstance.defaults.headers.common["Authorization"];
       throw new Error("This account is not authorized for the admin panel.");
     }
     setIsAuthenticated(true);
     applyAccessData(me.data);
-  };
-
-  const logout = () => {
-    localStorage.removeItem("adminToken");
-    delete axiosInstance.defaults.headers.common["Authorization"];
-    setIsAuthenticated(false);
-    setUser(null);
-    setModules([]);
-    setPermissions([]);
-    setProductFields({});
   };
 
   const hasModule = (module: string): boolean => {
@@ -112,6 +151,7 @@ export const AdminAuthProvider = ({ children }: Props) => {
         isAuthenticated,
         user,
         modules,
+        organizationName,
         permissions,
         productFields,
         hasModule,

@@ -31,6 +31,7 @@ import axiosInstance from "../services/axiosInstance";
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
 import { useCallback } from "react";
+import { sanitizeText } from "../utils/sanitizeHtml";
 
 
 interface Store {
@@ -64,7 +65,6 @@ const fetchStores = useCallback(async () => {
     const res = await axiosInstance.get("/api/stores");
     setStores(res.data?.data ?? []);
   } catch (error) {
-    console.error("Error loading stores:", error);
   }
 }, []);
   
@@ -80,7 +80,6 @@ const fetchStores = useCallback(async () => {
       setStores(res.data?.data ?? []);
     } catch (err) {
       if (!controller.signal.aborted) {
-        console.error(err);
       }
     }
   };
@@ -182,9 +181,9 @@ const fetchStores = useCallback(async () => {
           <Tbody>
             {stores.map((store) => (
               <Tr key={store._id}>
-                <Td>{store.name}</Td>
-                <Td>{store.city}</Td>
-                <Td>{store.address}</Td>
+                <Td>{sanitizeText(store.name)}</Td>
+                <Td>{sanitizeText(store.city ?? "")}</Td>
+                <Td>{sanitizeText(store.address ?? "")}</Td>
                 <Td>{store.deliveryFee != null ? `₹${store.deliveryFee}` : "—"}</Td>
                 <Td>
                   {store.location?.lat}, {store.location?.lng}

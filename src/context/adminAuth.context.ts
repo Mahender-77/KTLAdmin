@@ -12,6 +12,8 @@ export interface AdminAuthType {
     isSuperAdmin?: boolean;
   } | null;
   modules: string[];
+  /** Tenant display name from GET /api/auth/me (empty for platform super-admin). */
+  organizationName: string;
   permissions: string[];
   productFields: Record<string, boolean>;
   hasModule: (module: string) => boolean;

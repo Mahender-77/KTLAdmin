@@ -3,7 +3,15 @@ import { NavLink } from "react-router-dom";
 import { useAdminAuth } from "../context/useAdminAuth";
 
 export default function Sidebar() {
-  const { hasModule } = useAdminAuth();
+  const { hasModule, hasPermission, user } = useAdminAuth();
+
+  const superAdminItems: Array<{ label: string; to: string }> = [
+    { label: "Tenants", to: "/super-admin/tenants" },
+    { label: "Create tenant", to: "/super-admin/tenants/create" },
+    { label: "Module control", to: "/modules" },
+    { label: "Audit logs", to: "/super-admin/audit-logs" },
+    { label: "Users", to: "/super-admin/users" },
+  ];
 
   const menuItems: Array<{ label: string; to: string; visible: boolean }> = [
     { label: "Dashboard", to: "/", visible: true },
@@ -14,7 +22,12 @@ export default function Sidebar() {
     // Operations
     { label: "Orders", to: "/orders", visible: hasModule("order") },
     // Management
-    { label: "Inventory", to: "/stores", visible: hasModule("inventory") },
+    { label: "Inventory", to: "/inventory", visible: hasModule("inventory") },
+    {
+      label: "Activity log",
+      to: "/audit-entries",
+      visible: hasPermission("audit.view"),
+    },
     { label: "Users", to: "/register", visible: hasModule("user") },
   ];
 
@@ -35,7 +48,7 @@ export default function Sidebar() {
         {menuItems
           .filter((item) => item.visible)
           .map((item) => (
-            <NavLink key={item.to} to={item.to}>
+            <NavLink key={`${item.to}-${item.label}`} to={item.to}>
               {({ isActive }) => (
                 <Button
                   justifyContent="flex-start"
@@ -48,6 +61,30 @@ export default function Sidebar() {
             </NavLink>
           ))}
       </VStack>
+
+      {user?.isSuperAdmin ? (
+        <>
+          <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wider" mt={10} mb={2}>
+            Platform
+          </Text>
+          <VStack align="stretch" spacing={2}>
+            {superAdminItems.map((item) => (
+              <NavLink key={item.to} to={item.to}>
+                {({ isActive }) => (
+                  <Button
+                    justifyContent="flex-start"
+                    size="sm"
+                    variant={isActive ? "solid" : "ghost"}
+                    colorScheme="orange"
+                  >
+                    {item.label}
+                  </Button>
+                )}
+              </NavLink>
+            ))}
+          </VStack>
+        </>
+      ) : null}
     </Box>
   );
 }

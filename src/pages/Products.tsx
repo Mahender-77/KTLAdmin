@@ -80,6 +80,14 @@ import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import Sidebar from "../components/Sidebar";
 import axiosInstance from "../services/axiosInstance";
+import { sanitizeText } from "../utils/sanitizeHtml";
+import { useProductFieldConfig } from "../hooks/useProductFieldConfig";
+import {
+  validateStep0,
+  validateStep1,
+  validateStep2Variants,
+  formatZodError,
+} from "../schemas/productWizardSchema";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -331,7 +339,11 @@ const BatchForm = (p: BatchFormProps) => {
         <FormControl isRequired>
           <FormLabel fontSize="sm">Store</FormLabel>
           <Select size="sm" placeholder="Select store" value={batch.storeId} onChange={(e) => p.onBatchChange(index, "storeId", e.target.value)}>
-            {p.stores.map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
+            {p.stores.map((s) => (
+              <option key={s._id} value={s._id}>
+                {sanitizeText(s.name)}
+              </option>
+            ))}
           </Select>
         </FormControl>
         <FormControl isRequired>
@@ -403,6 +415,12 @@ export default function Products() {
   const toast = useToast();
   const navigate = useNavigate();
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const fieldVis = useProductFieldConfig();
+  const stepsForWizard = useMemo(
+    () => (fieldVis.inventoryBatches ? STEPS : STEPS.slice(0, 3)),
+    [fieldVis.inventoryBatches]
+  );
+  const stepCount = stepsForWizard.length;
 
   // ── Data ──
   const [products, setProducts] = useState<Product[]>([]);
@@ -415,8 +433,8 @@ export default function Products() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterPricingMode, setFilterPricingMode] = useState("all");
 
-  // ── Stepper ──
-  const { activeStep, setActiveStep } = useSteps({ index: 0, count: STEPS.length });
+  // ── Stepper (last step omitted when org disables initial stock batches) ──
+  const { activeStep, setActiveStep } = useSteps({ index: 0, count: stepCount });
 
   // ── Step 1: Basic Info ──
   const [name, setName] = useState("");
@@ -441,6 +459,18 @@ export default function Products() {
 
   // ── Step 3: Variants ──
   const [variants, setVariants] = useState<Variant[]>([]);
+
+  const effectivePricingMode = useMemo<"unit" | "custom-weight" | "fixed">(
+    () => (fieldVis.pricingMode ? pricingMode : "unit"),
+    [fieldVis.pricingMode, pricingMode]
+  );
+
+  const pricingModeOptionsForOrg = useMemo(
+    () => (fieldVis.variants ? [...PRICING_MODE_OPTIONS] : PRICING_MODE_OPTIONS.filter((o) => o.value !== "fixed")),
+    [fieldVis.variants]
+  );
+
+  const showAdvancedPricing = fieldVis.taxRate || fieldVis.minOrderQty || fieldVis.maxOrderQty;
 
   // ── Step 4: Initial Stock (one entry per variant for fixed, one for unit/custom-weight) ──
   const [addInitialStock, setAddInitialStock] = useState(false);
@@ -469,13 +499,40 @@ export default function Products() {
 
   // Keep initialBatches length in sync: one per variant for fixed, one for unit/custom-weight
   useEffect(() => {
-    const targetLength = pricingMode === "fixed" && variants.length > 0 ? variants.length : 1;
+    const targetLength =
+      fieldVis.variants && effectivePricingMode === "fixed" && variants.length > 0 ? variants.length : 1;
     setInitialBatches((prev) => {
       if (prev.length === targetLength) return prev;
       const next = Array.from({ length: targetLength }, (_, i) => prev[i] ?? emptyBatchEntry());
       return next;
     });
-  }, [pricingMode, variants.length]);
+  }, [fieldVis.variants, effectivePricingMode, variants.length]);
+
+  useEffect(() => {
+    if (!fieldVis.pricingMode) {
+      setPricingMode("unit");
+      setVariants([]);
+    }
+  }, [fieldVis.pricingMode]);
+
+  useEffect(() => {
+    if (!fieldVis.variants && pricingMode === "fixed") {
+      setPricingMode("unit");
+      setVariants([]);
+    }
+  }, [fieldVis.variants, pricingMode]);
+
+  useEffect(() => {
+    if (!fieldVis.inventoryBatches) {
+      setAddInitialStock(false);
+    }
+  }, [fieldVis.inventoryBatches]);
+
+  useEffect(() => {
+    if (activeStep >= stepCount) {
+      setActiveStep(Math.max(0, stepCount - 1));
+    }
+  }, [stepCount, activeStep, setActiveStep]);
 
   // ── Load ──
   const loadData = async () => {
@@ -501,7 +558,6 @@ export default function Products() {
         setCategories(categoryRes.data ?? []);
         setStores(storesRes.data?.data ?? []);
       } catch (e) {
-        console.error(e);
       }
     })();
     return () => { mounted = false; };
@@ -524,11 +580,14 @@ export default function Products() {
 
   // ── Apply Preset ──
   const applyPreset = (preset: typeof PRODUCT_TYPE_PRESETS[0]) => {
-    setPricingMode(preset.pricingMode as any);
+    if (!fieldVis.pricingMode) return;
+    const mode = preset.pricingMode as "unit" | "custom-weight" | "fixed";
+    if (mode === "fixed" && !fieldVis.variants) return;
+    setPricingMode(mode);
     setBaseUnit(preset.baseUnit);
     setHasExpiry(preset.hasExpiry);
     setShelfLifeDays(preset.shelfLifeDays ? String(preset.shelfLifeDays) : "");
-    if (preset.pricingMode === "fixed") setVariants([{ type: "weight", value: 0, unit: "g", price: 0 }]);
+    if (mode === "fixed") setVariants([{ type: "weight", value: 0, unit: "g", price: 0 }]);
     else setVariants([]);
   };
 
@@ -541,25 +600,37 @@ export default function Products() {
   const updateInitialBatch = (index: number, field: keyof InitialBatchEntry, value: string) =>
     setInitialBatches((prev) => prev.map((b, i) => (i === index ? { ...b, [field]: value } : b)));
 
-  // ── Validation per step ──
+  // ── Validation per step (Zod + org productFieldConfig) ──
   const validateStep = (step: number): string | null => {
+    const categoryId = selectedSubCategory || selectedCategory;
     if (step === 0) {
-      if (!name.trim()) return "Product name is required.";
-      if (!selectedCategory) return "Please select a category.";
+      const r0 = validateStep0(
+        {
+          name: fieldVis.name ? name : name.trim() || "Product",
+          description,
+          categoryId,
+          tags,
+        },
+        fieldVis
+      );
+      if (!r0.success) return formatZodError(r0.error);
     }
     if (step === 1) {
-      if (!pricePerUnit || isNaN(Number(pricePerUnit)) || Number(pricePerUnit) < 0)
-        return "Enter a valid price per unit (≥ 0).";
-      if (minOrderQty && maxOrderQty && Number(minOrderQty) > Number(maxOrderQty))
-        return "Min order qty cannot exceed max order qty.";
+      const r1 = validateStep1(
+        {
+          pricingMode: effectivePricingMode,
+          baseUnit,
+          pricePerUnit: fieldVis.pricePerUnit ? pricePerUnit : "0",
+          minOrderQty: fieldVis.minOrderQty ? minOrderQty : "",
+          maxOrderQty: fieldVis.maxOrderQty ? maxOrderQty : "",
+        },
+        fieldVis
+      );
+      if (!r1.success) return formatZodError(r1.error);
     }
     if (step === 2) {
-      if (pricingMode === "fixed" && variants.length === 0)
-        return "Add at least one variant for Fixed Variants pricing.";
-      for (const v of variants) {
-        if (!v.value || v.value <= 0) return "All variants need a value > 0.";
-        if (!v.price || v.price <= 0) return "All variants need a price > 0.";
-      }
+      const v2 = validateStep2Variants(effectivePricingMode, variants, fieldVis);
+      if (!v2.success) return v2.message;
     }
     return null;
   };
@@ -572,26 +643,36 @@ export default function Products() {
 
   // ── Create / Update ──
   const handleCreate = async () => {
-    for (let i = 0; i < STEPS.length - 1; i++) {
+    for (let i = 0; i < stepCount - 1; i++) {
       const err = validateStep(i);
-      if (err) { toast({ title: "Validation", description: err, status: "warning", duration: 3000 }); setActiveStep(i); return; }
+      if (err) {
+        toast({ title: "Validation", description: err, status: "warning", duration: 4000 });
+        setActiveStep(i);
+        return;
+      }
     }
 
     const categoryId = selectedSubCategory || selectedCategory;
+    const effectiveVariants =
+      fieldVis.variants && effectivePricingMode === "fixed" ? variants : [];
+    const submitName = fieldVis.name ? name.trim() : name.trim() || "Product";
+    const submitPrice = fieldVis.pricePerUnit ? Number(pricePerUnit) : 0;
+
     const fd = new FormData();
-    fd.append("name", name);
-    fd.append("description", description || "");
+    fd.append("name", submitName);
+    if (fieldVis.description) fd.append("description", description || "");
+    else fd.append("description", "");
     fd.append("category", categoryId);
-    fd.append("pricingMode", pricingMode);
+    fd.append("pricingMode", effectivePricingMode);
     fd.append("baseUnit", baseUnit);
-    fd.append("pricePerUnit", String(Number(pricePerUnit)));
+    fd.append("pricePerUnit", String(Number.isFinite(submitPrice) ? submitPrice : 0));
     fd.append("hasExpiry", hasExpiry ? "true" : "false");
-    if (tags.length) fd.append("tags", JSON.stringify(tags));
-    if (taxRate) fd.append("taxRate", taxRate);
-    if (minOrderQty) fd.append("minOrderQty", minOrderQty);
-    if (maxOrderQty) fd.append("maxOrderQty", maxOrderQty);
+    if (fieldVis.tags && tags.length) fd.append("tags", JSON.stringify(tags));
+    if (fieldVis.taxRate && taxRate) fd.append("taxRate", taxRate);
+    if (fieldVis.minOrderQty && minOrderQty) fd.append("minOrderQty", minOrderQty);
+    if (fieldVis.maxOrderQty && maxOrderQty) fd.append("maxOrderQty", maxOrderQty);
     if (hasExpiry && shelfLifeDays && Number(shelfLifeDays) > 0) fd.append("shelfLifeDays", shelfLifeDays);
-    fd.append("variants", JSON.stringify(pricingMode === "fixed" ? variants : []));
+    fd.append("variants", JSON.stringify(effectiveVariants));
     if (image) fd.append("image", image);
 
     try {
@@ -606,7 +687,7 @@ export default function Products() {
       const { data: created } = await axiosInstance.post("/api/products", fd);
 
       // Initial batches: one per variant for fixed, one for unit/custom-weight
-      if (addInitialStock && initialBatches.length > 0) {
+      if (fieldVis.inventoryBatches && addInitialStock && initialBatches.length > 0) {
         let batchErrors = 0;
         for (let i = 0; i < initialBatches.length; i++) {
           const b = initialBatches[i];
@@ -623,13 +704,12 @@ export default function Products() {
             payload.manufacturingDate = new Date(b.mfgDate).toISOString();
             payload.expiryDate = new Date(b.expiryDate).toISOString();
           }
-          if (pricingMode === "fixed" && created.variants?.[i]?._id) {
+          if (effectivePricingMode === "fixed" && created.variants?.[i]?._id) {
             payload.variant = created.variants[i]._id;
           }
           try {
             await axiosInstance.post(`/api/products/${created._id}/add-batch`, payload);
           } catch (e) {
-            console.error("Batch error:", e);
             batchErrors++;
           }
         }
@@ -642,7 +722,6 @@ export default function Products() {
       handleClose();
       await loadData();
     } catch (e) {
-      console.error(e);
       toast({ title: "Error creating product", status: "error", duration: 3000 });
     }
   };
@@ -663,7 +742,10 @@ export default function Products() {
       setTagInput("");
       setImage(null);
       setImagePreview(p.images?.[0] ?? null);
-      setPricingMode((p.pricingMode ?? "unit") as any);
+      let nextMode = (p.pricingMode ?? "unit") as "unit" | "custom-weight" | "fixed";
+      if (!fieldVis.pricingMode) nextMode = "unit";
+      if (nextMode === "fixed" && !fieldVis.variants) nextMode = "unit";
+      setPricingMode(nextMode);
       setBaseUnit(p.baseUnit ?? "pcs");
       setPricePerUnit(String(p.pricePerUnit ?? ""));
       setHasExpiry(p.hasExpiry ?? false);
@@ -671,14 +753,17 @@ export default function Products() {
       setTaxRate(p.taxRate != null ? String(p.taxRate) : "");
       setMinOrderQty(p.minOrderQty != null ? String(p.minOrderQty) : "");
       setMaxOrderQty(p.maxOrderQty != null ? String(p.maxOrderQty) : "");
-      setVariants(Array.isArray(p.variants) && p.variants.length > 0 ? p.variants : []);
+      setVariants(
+        nextMode === "fixed" && fieldVis.variants && Array.isArray(p.variants) && p.variants.length > 0
+          ? p.variants
+          : []
+      );
       setAddInitialStock(false);
       setInitialBatches([emptyBatchEntry()]);
       setEditingProductId(product._id);
       setActiveStep(0);
       onOpen();
     } catch (e) {
-      console.error(e);
       toast({ title: "Error loading product", status: "error", duration: 3000 });
     } finally {
       setLoadingEdit(false);
@@ -704,40 +789,53 @@ export default function Products() {
       case 0:
         return (
           <VStack spacing={4} align="stretch">
-            {/* Quick presets */}
-            <Box>
-              <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={2} textTransform="uppercase" letterSpacing="wide">
-                Quick Product Presets
-              </Text>
-              <Wrap spacing={2}>
-                {PRODUCT_TYPE_PRESETS.map((p) => (
-                  <WrapItem key={p.label}>
-                    <Button size="xs" variant="outline" colorScheme="orange" onClick={() => applyPreset(p)}>
-                      {p.label}
-                    </Button>
-                  </WrapItem>
-                ))}
-              </Wrap>
-              <Text fontSize="xs" color="gray.400" mt={1}>Presets auto-fill pricing & unit settings on Step 2</Text>
-            </Box>
+            {fieldVis.pricingMode && (
+              <>
+                <Box>
+                  <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={2} textTransform="uppercase" letterSpacing="wide">
+                    Quick Product Presets
+                  </Text>
+                  <Wrap spacing={2}>
+                    {PRODUCT_TYPE_PRESETS.map((preset) => (
+                      <WrapItem key={preset.label}>
+                        <Button size="xs" variant="outline" colorScheme="orange" onClick={() => applyPreset(preset)}>
+                          {preset.label}
+                        </Button>
+                      </WrapItem>
+                    ))}
+                  </Wrap>
+                  <Text fontSize="xs" color="gray.400" mt={1}>Presets auto-fill pricing & unit settings on Step 2</Text>
+                </Box>
+                <Divider />
+              </>
+            )}
 
-            <Divider />
+            {fieldVis.name ? (
+              <FormControl isRequired>
+                <FormLabel>Product Name</FormLabel>
+                <Input placeholder="e.g. Fresh Ginger" value={name} onChange={(e) => setName(e.target.value)} />
+              </FormControl>
+            ) : (
+              <Alert status="info" borderRadius="lg" size="sm">
+                <AlertIcon />
+                <AlertDescription fontSize="sm">
+                  Your organization hides the product name field. A default name is used when saving if you leave this blank.
+                </AlertDescription>
+              </Alert>
+            )}
 
-            <FormControl isRequired>
-              <FormLabel>Product Name</FormLabel>
-              <Input placeholder="e.g. Fresh Ginger" value={name} onChange={(e) => setName(e.target.value)} />
-            </FormControl>
-
-            <FormControl>
-              <FormLabel>Description</FormLabel>
-              <Textarea
-                placeholder="Describe the product..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                resize="vertical"
-              />
-            </FormControl>
+            {fieldVis.description && (
+              <FormControl>
+                <FormLabel>Description</FormLabel>
+                <Textarea
+                  placeholder="Describe the product..."
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                  resize="vertical"
+                />
+              </FormControl>
+            )}
 
             <Grid templateColumns="1fr 1fr" gap={4}>
               <FormControl isRequired>
@@ -769,48 +867,49 @@ export default function Products() {
               )}
             </Grid>
 
-            {/* Tags */}
-            <FormControl>
-              <FormLabel>Tags <Text as="span" fontSize="xs" color="gray.400" fontWeight="normal">(optional — for search/filter)</Text></FormLabel>
-              <HStack>
-                <Input
-                  placeholder="e.g. organic, imported, seasonal"
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if ((e.key === "Enter" || e.key === ",") && tagInput.trim()) {
-                      e.preventDefault();
-                      const t = tagInput.trim().replace(/,$/, "");
-                      if (t && !tags.includes(t)) setTags((prev) => [...prev, t]);
-                      setTagInput("");
-                    }
-                  }}
-                />
-                <Button
-                  size="sm"
-                  colorScheme="orange"
-                  variant="outline"
-                  onClick={() => {
-                    const t = tagInput.trim();
-                    if (t && !tags.includes(t)) { setTags((prev) => [...prev, t]); setTagInput(""); }
-                  }}
-                >
-                  Add
-                </Button>
-              </HStack>
-              {tags.length > 0 && (
-                <Wrap mt={2} spacing={1}>
-                  {tags.map((tag) => (
-                    <WrapItem key={tag}>
-                      <Tag size="sm" colorScheme="orange" borderRadius="full">
-                        <TagLabel>{tag}</TagLabel>
-                        <TagCloseButton onClick={() => setTags((prev) => prev.filter((t) => t !== tag))} />
-                      </Tag>
-                    </WrapItem>
-                  ))}
-                </Wrap>
-              )}
-            </FormControl>
+            {fieldVis.tags && (
+              <FormControl>
+                <FormLabel>Tags <Text as="span" fontSize="xs" color="gray.400" fontWeight="normal">(optional — for search/filter)</Text></FormLabel>
+                <HStack>
+                  <Input
+                    placeholder="e.g. organic, imported, seasonal"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === ",") && tagInput.trim()) {
+                        e.preventDefault();
+                        const t = tagInput.trim().replace(/,$/, "");
+                        if (t && !tags.includes(t)) setTags((prev) => [...prev, t]);
+                        setTagInput("");
+                      }
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    colorScheme="orange"
+                    variant="outline"
+                    onClick={() => {
+                      const t = tagInput.trim();
+                      if (t && !tags.includes(t)) { setTags((prev) => [...prev, t]); setTagInput(""); }
+                    }}
+                  >
+                    Add
+                  </Button>
+                </HStack>
+                {tags.length > 0 && (
+                  <Wrap mt={2} spacing={1}>
+                    {tags.map((tag) => (
+                      <WrapItem key={tag}>
+                        <Tag size="sm" colorScheme="orange" borderRadius="full">
+                          <TagLabel>{tag}</TagLabel>
+                          <TagCloseButton onClick={() => setTags((prev) => prev.filter((t) => t !== tag))} />
+                        </Tag>
+                      </WrapItem>
+                    ))}
+                  </Wrap>
+                )}
+              </FormControl>
+            )}
 
             {/* Image */}
             <FormControl>
@@ -873,26 +972,34 @@ export default function Products() {
       case 1:
         return (
           <VStack spacing={5} align="stretch">
-            {/* Pricing Mode Cards */}
-            <FormControl isRequired>
-              <FormLabel fontWeight="semibold">Pricing Mode</FormLabel>
-              <VStack spacing={2}>
-                {PRICING_MODE_OPTIONS.map((opt) => (
-                  <PricingCard
-                    key={opt.value}
-                    option={opt}
-                    selected={pricingMode === opt.value}
-                    onClick={() => {
-                      setPricingMode(opt.value as any);
-                      if (opt.value === "fixed") setVariants([{ type: "weight", value: 0, unit: "g", price: 0 }]);
-                      else setVariants([]);
-                    }}
-                  />
-                ))}
-              </VStack>
-            </FormControl>
+            {fieldVis.pricingMode ? (
+              <FormControl isRequired>
+                <FormLabel fontWeight="semibold">Pricing Mode</FormLabel>
+                <VStack spacing={2}>
+                  {pricingModeOptionsForOrg.map((opt) => (
+                    <PricingCard
+                      key={opt.value}
+                      option={opt}
+                      selected={pricingMode === opt.value}
+                      onClick={() => {
+                        setPricingMode(opt.value as "unit" | "custom-weight" | "fixed");
+                        if (opt.value === "fixed") setVariants([{ type: "weight", value: 0, unit: "g", price: 0 }]);
+                        else setVariants([]);
+                      }}
+                    />
+                  ))}
+                </VStack>
+              </FormControl>
+            ) : (
+              <Alert status="info" borderRadius="lg">
+                <AlertIcon />
+                <AlertDescription fontSize="sm">
+                  Pricing mode is fixed to <strong>Unit</strong> for your organization.
+                </AlertDescription>
+              </Alert>
+            )}
 
-            <Grid templateColumns="1fr 1fr" gap={4}>
+            <Grid templateColumns={fieldVis.pricePerUnit ? "1fr 1fr" : "1fr"} gap={4}>
               <FormControl isRequired>
                 <FormLabel>Base Unit
                   <Tooltip label="The smallest unit in which stock is counted. e.g. kg for ginger, pcs for watches.">
@@ -904,21 +1011,23 @@ export default function Products() {
                 </Select>
               </FormControl>
 
-              <FormControl isRequired>
-                <FormLabel>Price per {baseUnit} (₹)</FormLabel>
-                <InputGroup>
-                  <InputLeftElement pointerEvents="none" color="gray.400" fontSize="sm">₹</InputLeftElement>
-                  <Input
-                    pl={8}
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    placeholder="e.g. 100"
-                    value={pricePerUnit}
-                    onChange={(e) => setPricePerUnit(e.target.value)}
-                  />
-                </InputGroup>
-              </FormControl>
+              {fieldVis.pricePerUnit && (
+                <FormControl isRequired>
+                  <FormLabel>Price per {baseUnit} (₹)</FormLabel>
+                  <InputGroup>
+                    <InputLeftElement pointerEvents="none" color="gray.400" fontSize="sm">₹</InputLeftElement>
+                    <Input
+                      pl={8}
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      placeholder="e.g. 100"
+                      value={pricePerUnit}
+                      onChange={(e) => setPricePerUnit(e.target.value)}
+                    />
+                  </InputGroup>
+                </FormControl>
+              )}
             </Grid>
 
             {/* Expiry */}
@@ -940,53 +1049,70 @@ export default function Products() {
               )}
             </Box>
 
-            {/* Advanced settings */}
-            <Accordion allowToggle>
-              <AccordionItem border="1px solid" borderColor="gray.200" borderRadius="lg">
-                <AccordionButton borderRadius="lg" _expanded={{ bg: "gray.50" }}>
-                  <Box flex={1} textAlign="left" fontSize="sm" fontWeight="medium">Advanced Settings (tax, order limits)</Box>
-                  <AccordionIcon />
-                </AccordionButton>
-                <AccordionPanel pb={4}>
-                  <Grid templateColumns="repeat(3, 1fr)" gap={3}>
-                    <FormControl>
-                      <FormLabel fontSize="sm">Tax Rate (%)</FormLabel>
-                      <NumberInput value={taxRate} min={0} max={100} onChange={(v) => setTaxRate(v)}>
-                        <NumberInputField placeholder="e.g. 18" />
-                        <NumberInputStepper><NumberIncrementStepper /><NumberDecrementStepper /></NumberInputStepper>
-                      </NumberInput>
-                      <FormHelperText fontSize="xs">GST/VAT %</FormHelperText>
-                    </FormControl>
-                    <FormControl>
-                      <FormLabel fontSize="sm">Min Order ({baseUnit})</FormLabel>
-                      <NumberInput value={minOrderQty} min={0} onChange={(v) => setMinOrderQty(v)}>
-                        <NumberInputField placeholder="e.g. 0.25" />
-                        <NumberInputStepper><NumberIncrementStepper /><NumberDecrementStepper /></NumberInputStepper>
-                      </NumberInput>
-                    </FormControl>
-                    <FormControl>
-                      <FormLabel fontSize="sm">Max Order ({baseUnit})</FormLabel>
-                      <NumberInput value={maxOrderQty} min={0} onChange={(v) => setMaxOrderQty(v)}>
-                        <NumberInputField placeholder="e.g. 50" />
-                        <NumberInputStepper><NumberIncrementStepper /><NumberDecrementStepper /></NumberInputStepper>
-                      </NumberInput>
-                    </FormControl>
-                  </Grid>
-                </AccordionPanel>
-              </AccordionItem>
-            </Accordion>
+            {showAdvancedPricing && (
+              <Accordion allowToggle>
+                <AccordionItem border="1px solid" borderColor="gray.200" borderRadius="lg">
+                  <AccordionButton borderRadius="lg" _expanded={{ bg: "gray.50" }}>
+                    <Box flex={1} textAlign="left" fontSize="sm" fontWeight="medium">Advanced Settings (tax, order limits)</Box>
+                    <AccordionIcon />
+                  </AccordionButton>
+                  <AccordionPanel pb={4}>
+                    <Grid
+                      templateColumns={`repeat(${[fieldVis.taxRate, fieldVis.minOrderQty, fieldVis.maxOrderQty].filter(Boolean).length || 1}, 1fr)`}
+                      gap={3}
+                    >
+                      {fieldVis.taxRate && (
+                        <FormControl>
+                          <FormLabel fontSize="sm">Tax Rate (%)</FormLabel>
+                          <NumberInput value={taxRate} min={0} max={100} onChange={(v) => setTaxRate(v)}>
+                            <NumberInputField placeholder="e.g. 18" />
+                            <NumberInputStepper><NumberIncrementStepper /><NumberDecrementStepper /></NumberInputStepper>
+                          </NumberInput>
+                          <FormHelperText fontSize="xs">GST/VAT %</FormHelperText>
+                        </FormControl>
+                      )}
+                      {fieldVis.minOrderQty && (
+                        <FormControl>
+                          <FormLabel fontSize="sm">Min Order ({baseUnit})</FormLabel>
+                          <NumberInput value={minOrderQty} min={0} onChange={(v) => setMinOrderQty(v)}>
+                            <NumberInputField placeholder="e.g. 0.25" />
+                            <NumberInputStepper><NumberIncrementStepper /><NumberDecrementStepper /></NumberInputStepper>
+                          </NumberInput>
+                        </FormControl>
+                      )}
+                      {fieldVis.maxOrderQty && (
+                        <FormControl>
+                          <FormLabel fontSize="sm">Max Order ({baseUnit})</FormLabel>
+                          <NumberInput value={maxOrderQty} min={0} onChange={(v) => setMaxOrderQty(v)}>
+                            <NumberInputField placeholder="e.g. 50" />
+                            <NumberInputStepper><NumberIncrementStepper /><NumberDecrementStepper /></NumberInputStepper>
+                          </NumberInput>
+                        </FormControl>
+                      )}
+                    </Grid>
+                  </AccordionPanel>
+                </AccordionItem>
+              </Accordion>
+            )}
           </VStack>
         );
 
       case 2:
         return (
           <VStack spacing={4} align="stretch">
-            {pricingMode !== "fixed" ? (
+            {!fieldVis.variants ? (
+              <Alert status="info" borderRadius="lg">
+                <AlertIcon />
+                <AlertDescription fontSize="sm">
+                  Variants are disabled for your organization. Continue to the next step.
+                </AlertDescription>
+              </Alert>
+            ) : effectivePricingMode !== "fixed" ? (
               <Alert status="info" borderRadius="lg">
                 <AlertIcon />
                 <AlertDescription fontSize="sm">
                   <strong>Variants are only used with Fixed Variants pricing.</strong><br />
-                  Your current mode <Badge colorScheme="blue" mx={1}>{pricingMode}</Badge> uses <strong>pricePerUnit × quantity</strong>.
+                  Your current mode <Badge colorScheme="blue" mx={1}>{effectivePricingMode}</Badge> uses <strong>pricePerUnit × quantity</strong>.
                   You can skip this step.
                 </AlertDescription>
               </Alert>
@@ -1029,7 +1155,7 @@ export default function Products() {
             onBatchChange={updateInitialBatch}
             hasExpiry={hasExpiry}
             baseUnit={baseUnit}
-            pricingMode={pricingMode}
+            pricingMode={effectivePricingMode}
             variants={variants}
           />
         );
@@ -1039,7 +1165,7 @@ export default function Products() {
     }
   };
 
-  const progress = ((activeStep) / (STEPS.length - 1)) * 100;
+  const progress = stepCount <= 1 ? 100 : (activeStep / (stepCount - 1)) * 100;
 
   return (
     <Box bg="gray.100" minH="100vh">
@@ -1072,12 +1198,14 @@ export default function Products() {
               {flatCategories.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
             </Select>
 
-            <Select value={filterPricingMode} onChange={(e) => setFilterPricingMode(e.target.value)} maxW="180px" bg="gray.50" border="none">
-              <option value="all">All Pricing</option>
-              <option value="unit">Unit</option>
-              <option value="custom-weight">Custom Weight</option>
-              <option value="fixed">Fixed Variants</option>
-            </Select>
+            {fieldVis.pricingMode && (
+              <Select value={filterPricingMode} onChange={(e) => setFilterPricingMode(e.target.value)} maxW="180px" bg="gray.50" border="none">
+                <option value="all">All Pricing</option>
+                <option value="unit">Unit</option>
+                <option value="custom-weight">Custom Weight</option>
+                <option value="fixed">Fixed Variants</option>
+              </Select>
+            )}
 
             <Select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} maxW="140px" bg="gray.50" border="none">
               <option value="all">All Status</option>
@@ -1119,16 +1247,25 @@ export default function Products() {
                   return (
                     <Tr key={product._id} _hover={{ bg: "gray.50" }}>
                       <Td>
-                        <Text fontWeight="medium">{product.name}</Text>
-                        {product.tags?.length ? (
+                        <Text fontWeight="medium">{sanitizeText(product.name)}</Text>
+                        {fieldVis.tags && product.tags?.length ? (
                           <HStack mt={1} spacing={1} flexWrap="wrap">
                             {product.tags.slice(0, 3).map((t) => (
-                              <Tag key={t} size="sm" colorScheme="gray" borderRadius="full"><TagLabel fontSize="10px">{t}</TagLabel></Tag>
+                              <Tag
+                                key={t}
+                                size="sm"
+                                colorScheme="gray"
+                                borderRadius="full"
+                              >
+                                <TagLabel fontSize="10px">{sanitizeText(t)}</TagLabel>
+                              </Tag>
                             ))}
                           </HStack>
                         ) : null}
                       </Td>
-                      <Td color="gray.600" fontSize="sm">{product.category?.name || "N/A"}</Td>
+                      <Td color="gray.600" fontSize="sm">
+                        {sanitizeText(product.category?.name || "N/A")}
+                      </Td>
                       <Td>
                         <Badge colorScheme={mode === "fixed" ? "purple" : mode === "custom-weight" ? "blue" : "teal"}>
                           {mode === "unit" ? "Unit" : mode === "custom-weight" ? "Custom Weight" : "Fixed"}
@@ -1136,7 +1273,9 @@ export default function Products() {
                       </Td>
                       <Td>
                         {isUnitOrWeight ? (
-                          <Text fontWeight="semibold" fontSize="sm">₹{product.pricePerUnit ?? "—"} / {product.baseUnit ?? "—"}</Text>
+                          <Text fontWeight="semibold" fontSize="sm">
+                            ₹{product.pricePerUnit ?? "—"} / {sanitizeText(product.baseUnit ?? "—")}
+                          </Text>
                         ) : (
                           <VStack spacing={0} align="flex-start">
                             {(() => {
@@ -1148,7 +1287,9 @@ export default function Products() {
                                   {showOriginal && <Text fontSize="xs" color="gray.500" textDecoration="line-through">₹{v0.price}</Text>}
                                   <Text fontWeight="semibold" fontSize="sm">₹{effectivePrice ?? "—"}</Text>
                                   {v0 && (
-                                    <Text fontSize="xs" color="gray.400">{v0.value} {v0.unit}</Text>
+                                    <Text fontSize="xs" color="gray.400">
+                                      {v0.value} {sanitizeText(v0.unit)}
+                                    </Text>
                                   )}
                                 </>
                               );
@@ -1157,7 +1298,11 @@ export default function Products() {
                         )}
                       </Td>
                       <Td isNumeric>
-                        <Text fontWeight="medium">{product.availableQuantity != null ? `${product.availableQuantity} ${product.baseUnit}` : "—"}</Text>
+                        <Text fontWeight="medium">
+                          {product.availableQuantity != null
+                            ? `${product.availableQuantity} ${sanitizeText(product.baseUnit)}`
+                            : "—"}
+                        </Text>
                       </Td>
                       <Td>
                         <Badge colorScheme={product.hasExpiry ? "red" : "gray"} variant="subtle">
@@ -1202,7 +1347,7 @@ export default function Products() {
           <ModalHeader pb={2}>
             <Text>{editingProductId ? "Edit Product" : "Add New Product"}</Text>
             <Text fontSize="sm" fontWeight="normal" color="gray.500">
-              Step {activeStep + 1} of {STEPS.length} — {STEPS[activeStep].description}
+              Step {activeStep + 1} of {stepCount} — {stepsForWizard[activeStep]?.description ?? ""}
             </Text>
             <Progress value={progress} size="xs" colorScheme="orange" mt={2} borderRadius="full" />
           </ModalHeader>
@@ -1211,7 +1356,7 @@ export default function Products() {
           {/* Stepper */}
           <Box px={6} py={3} bg="gray.50" borderTop="1px solid" borderBottom="1px solid" borderColor="gray.100">
             <Stepper index={activeStep} size="sm" colorScheme="orange">
-              {STEPS.map((step, index) => (
+              {stepsForWizard.map((step, index) => (
                 <Step key={index}>
                   <StepIndicator>
                     <StepStatus complete={<StepIcon />} incomplete={<StepNumber />} active={<StepNumber />} />
@@ -1233,9 +1378,9 @@ export default function Products() {
                 {activeStep === 0 ? "Cancel" : "← Back"}
               </Button>
               <HStack>
-                {activeStep < STEPS.length - 1 ? (
+                {activeStep < stepCount - 1 ? (
                   <>
-                    {activeStep === 2 && pricingMode !== "fixed" && (
+                    {activeStep === 2 && fieldVis.variants && effectivePricingMode !== "fixed" && (
                       <Button variant="ghost" size="sm" color="gray.400" onClick={() => setActiveStep(activeStep + 1)}>Skip</Button>
                     )}
                     <Button colorScheme="orange" onClick={goNext}>Next →</Button>
