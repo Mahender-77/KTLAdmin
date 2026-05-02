@@ -23,6 +23,8 @@ export default function Sidebar() {
     { label: "Orders", to: "/orders", visible: hasModule("order") },
     // Management
     { label: "Inventory", to: "/inventory", visible: hasModule("inventory") },
+    { label: "Inventory Analysis", to: "/inventory/analysis", visible: hasModule("inventory") },
+    { label: "Recommendations", to: "/recommendations", visible: hasModule("product") },
     {
       label: "Activity log",
       to: "/audit-entries",

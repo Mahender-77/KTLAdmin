@@ -6,12 +6,12 @@ const CONTROL_CARDS: Array<{ title: string; description: string; route: string }
   {
     title: "Create Organization",
     description: "Provision a new tenant with default platform configuration.",
-    route: "/organizations/create",
+    route: "/super-admin/tenants/create",
   },
   {
     title: "Manage Organizations",
     description: "View subscription, status, and enabled modules per tenant.",
-    route: "/organizations",
+    route: "/super-admin/tenants",
   },
   {
     title: "Manage Client Admins",

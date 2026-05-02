@@ -26,9 +26,13 @@ import {
   Divider,
   Flex,
   Link,
+  Alert,
+  AlertIcon,
+  AlertDescription,
 } from "@chakra-ui/react";
 import { SearchIcon } from "@chakra-ui/icons";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useContext, useMemo } from "react";
+import { AdminAuthContext } from "../context/adminAuth.context";
 import axiosInstance from "../services/axiosInstance";
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
@@ -73,7 +77,14 @@ interface Order {
   totalAmount: number;
   paymentStatus: string;
   orderStatus: string;
+  /** Pool / last-mile rider who accepted the order in the courier app */
+  deliveryBoy?: User | null;
   deliveryPerson?: User | null;
+  /** Order-level lifecycle from marketplace delivery flow */
+  deliveryStatus?: string | null;
+  acceptedAt?: string;
+  pickedUpAt?: string;
+  deliveredAt?: string;
   address?: OrderAddress;
   subOrders?: SubOrder[];
   createdAt: string;
@@ -142,10 +153,91 @@ function apiStatusToDbLabel(api: ApiOrderStatus): string {
   }
 }
 
+/** Labels for Order.deliveryStatus (courier pool / handoff) */
+function orderDeliveryStatusLabel(s: string | null | undefined): string {
+  switch (s) {
+    case "pending":
+      return "Awaiting rider";
+    case "assigned":
+      return "Rider assigned";
+    case "accepted":
+      return "Accepted";
+    case "in-transit":
+      return "In transit";
+    case "out_for_delivery":
+      return "Out for delivery";
+    case "delivered":
+      return "Delivered";
+    default:
+      return s ? sanitizeText(String(s)) : "—";
+  }
+}
+
+function orderDeliveryStatusColor(s: string | null | undefined): string {
+  switch (s) {
+    case "delivered":
+      return "green";
+    case "out_for_delivery":
+    case "in-transit":
+      return "blue";
+    case "assigned":
+    case "accepted":
+      return "purple";
+    default:
+      return "gray";
+  }
+}
+
+function subOrderDeliveryLabel(status: string | undefined): string {
+  switch (status) {
+    case "pending":
+      return "Awaiting courier in app";
+    case "accepted":
+      return "Courier assigned — prepare handoff";
+    case "out_for_delivery":
+      return "Picked up / on the way";
+    case "delivered":
+      return "Delivered to customer";
+    default:
+      return status ?? "—";
+  }
+}
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  const e = error as {
+    response?: { data?: { message?: string; errorCode?: string }; status?: number };
+    message?: string;
+  };
+  const msg = e?.response?.data?.message ?? e?.message;
+  const code = e?.response?.data?.errorCode;
+  const status = e?.response?.status;
+  if (typeof msg === "string" && msg.trim().length > 0) {
+    return code ? `${msg} (${code})` : msg;
+  }
+  if (typeof status === "number") {
+    return `${fallback} (HTTP ${status})`;
+  }
+  return fallback;
+}
+
 export default function Orders() {
+  const auth = useContext(AdminAuthContext);
   const toast = useToast();
+  const orgId = auth?.user?.organizationId ?? null;
+  const tenantRequestConfig = useMemo(
+    () =>
+      orgId
+        ? {
+            headers: {
+              "x-organization-id": orgId,
+            },
+          }
+        : undefined,
+    [orgId]
+  );
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -161,37 +253,80 @@ export default function Orders() {
   const [trackingError, setTrackingError] = useState<string | null>(null);
   const limit = 20;
 
+  useEffect(() => {
+    console.log("[orders/admin][frontend] auth context", {
+      isAuthenticated: auth?.isAuthenticated,
+      userId: auth?.user ? (auth.user as { _id?: string })._id ?? null : null,
+      role: auth?.user?.role ?? null,
+      orgId: orgId ?? null,
+      orgName: auth?.organizationName ?? null,
+      modules: auth?.modules ?? [],
+    });
+  }, [auth, orgId]);
+
   const fetchOrderTracking = useCallback(async (orderId: string) => {
     setTrackingLoading(true);
     setTrackingError(null);
     try {
-      const res = await axiosInstance.get<OrderTrackingPayload>(`/api/orders/admin/${orderId}/tracking`);
+      const res = await axiosInstance.get<OrderTrackingPayload>(
+        `/api/orders/admin/${orderId}/tracking`,
+        tenantRequestConfig
+      );
       setTrackingData(res.data ?? null);
-    } catch {
+    } catch (error) {
       setTrackingData(null);
-      setTrackingError("Could not load live tracking. Try Refresh, or confirm this order belongs to your organization.");
+      setTrackingError(
+        getApiErrorMessage(
+          error,
+          "Could not load live tracking. Try Refresh, or confirm this order belongs to your organization."
+        )
+      );
     } finally {
       setTrackingLoading(false);
     }
-  }, []);
+  }, [tenantRequestConfig]);
 
   const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (filterStatus !== "all") params.set("status", filterStatus);
       if (filterPayment !== "all") params.set("paymentStatus", filterPayment);
-      const res = await axiosInstance.get(`/api/orders/admin/all?${params}`);
+      const url = `/api/orders/admin/all?${params}`;
+      console.log("[orders/admin][frontend] request", {
+        url,
+        page,
+        limit,
+        filterStatus,
+        filterPayment,
+        orgId,
+        requestHeaders: tenantRequestConfig?.headers ?? null,
+      });
+      const res = await axiosInstance.get(url, tenantRequestConfig);
+      console.log("[orders/admin][frontend] response", {
+        status: res.status,
+        returned: Array.isArray(res.data?.data) ? res.data.data.length : -1,
+        total: res.data?.total ?? null,
+        totalPages: res.data?.totalPages ?? null,
+        firstOrderId: Array.isArray(res.data?.data) && res.data.data[0]?._id ? res.data.data[0]._id : null,
+      });
       setOrders(res.data?.data ?? []);
       setTotal(res.data?.total ?? 0);
       setTotalPages(res.data?.totalPages ?? 1);
     } catch (e) {
-      toast({ title: "Error loading orders", status: "error", duration: 3000 });
+      console.log("[orders/admin][frontend] request failed", {
+        error: e,
+        message: getApiErrorMessage(e, "Error loading orders"),
+      });
+      const msg = getApiErrorMessage(e, "Error loading orders");
+      setLoadError(msg);
+      toast({ title: "Error loading orders", description: msg, status: "error", duration: 4000 });
       setOrders([]);
     } finally {
       setLoading(false);
     }
-  }, [page, filterStatus, filterPayment, toast]);
+  }, [page, filterStatus, filterPayment, toast, tenantRequestConfig]);
 
   useEffect(() => {
     fetchOrders();
@@ -215,10 +350,15 @@ export default function Orders() {
   const handleViewDetails = async (order: Order) => {
     try {
       setDetailLoading(true);
-      const res = await axiosInstance.get(`/api/orders/admin/${order._id}`);
+      const res = await axiosInstance.get(`/api/orders/admin/${order._id}`, tenantRequestConfig);
       setSelectedOrder(res.data);
     } catch (e) {
-      toast({ title: "Error loading order details", status: "error", duration: 3000 });
+      toast({
+        title: "Error loading order details",
+        description: getApiErrorMessage(e, "Could not load order details"),
+        status: "error",
+        duration: 4000,
+      });
     } finally {
       setDetailLoading(false);
     }
@@ -228,21 +368,33 @@ export default function Orders() {
     if (!selectedOrder) return;
     setStatusSaving(true);
     try {
-      await axiosInstance.patch(`/api/orders/${selectedOrder._id}/status`, {
-        status: statusDraft,
-      });
+      const res = await axiosInstance.patch(
+        `/api/orders/${selectedOrder._id}/status`,
+        {
+          status: statusDraft,
+        },
+        tenantRequestConfig
+      );
       const nextDb = apiStatusToDbLabel(statusDraft);
       setSelectedOrder({ ...selectedOrder, orderStatus: nextDb });
+      const delivered = res.data?.notification?.delivered === true;
       toast({
         title: "Order status updated",
-        description: "Customer will receive a push notification.",
-        status: "success",
-        duration: 4000,
+        description: delivered
+          ? "Customer was notified by push."
+          : "Customer was not notified (push token missing on customer account).",
+        status: delivered ? "success" : "warning",
+        duration: 5000,
       });
       await fetchOrders();
       void fetchOrderTracking(selectedOrder._id);
-    } catch {
-      toast({ title: "Could not update order status", status: "error", duration: 4000 });
+    } catch (error) {
+      toast({
+        title: "Could not update order status",
+        description: getApiErrorMessage(error, "Request failed"),
+        status: "error",
+        duration: 4000,
+      });
     } finally {
       setStatusSaving(false);
     }
@@ -268,7 +420,37 @@ export default function Orders() {
       <Header />
 
       <Box ml="260px" mt="70px" p={8}>
-        <Heading mb={6}>Orders</Heading>
+        <Heading mb={2}>Orders</Heading>
+        {auth?.organizationName ? (
+          <Text fontSize="sm" color="gray.600" mb={2}>
+            Orders placed by customers in{" "}
+            <Text as="span" fontWeight="600" color="gray.700">
+              {sanitizeText(auth.organizationName)}
+            </Text>
+            ’s storefront — only items from your catalog and inventory ({auth.user?.organizationId ? (
+              <Text as="span" fontSize="xs" color="gray.400" fontFamily="mono">
+                org {String(auth.user.organizationId).slice(-8)}
+              </Text>
+            ) : "this tenant"}).
+          </Text>
+        ) : (
+          <Text fontSize="sm" color="gray.600" mb={2}>
+            Only orders for products sold under your organization&apos;s marketplace account are listed.
+          </Text>
+        )}
+        <Alert status="info" borderRadius="md" fontSize="sm" mb={4}>
+          <AlertIcon />
+          <AlertDescription>
+            Courier acceptance, store pickup, customer OTP, and live GPS are handled in the{" "}
+            <strong>courier app</strong>. Here you confirm order status (notifies the buyer) and monitor tracking below.
+          </AlertDescription>
+        </Alert>
+        {loadError ? (
+          <Alert status="error" borderRadius="md" fontSize="sm" mb={4}>
+            <AlertIcon />
+            <AlertDescription>{sanitizeText(loadError)}</AlertDescription>
+          </Alert>
+        ) : null}
 
         <Box bg="white" p={5} rounded="lg" shadow="sm" mb={6}>
           <HStack spacing={4} flexWrap="wrap" mb={4}>
@@ -329,8 +511,9 @@ export default function Orders() {
                   <Th>Date</Th>
                   <Th>Total</Th>
                   <Th>Payment</Th>
-                  <Th>Status</Th>
-                  <Th>Delivered By</Th>
+                  <Th>Order status</Th>
+                  <Th>Delivery</Th>
+                  <Th>Assigned rider</Th>
                   <Th>Actions</Th>
                 </Tr>
               </Thead>
@@ -359,10 +542,17 @@ export default function Orders() {
                       </Badge>
                     </Td>
                     <Td>
-                      {order.deliveryPerson?.name ? (
+                      <Badge colorScheme={orderDeliveryStatusColor(order.deliveryStatus ?? undefined)}>
+                        {orderDeliveryStatusLabel(order.deliveryStatus ?? undefined)}
+                      </Badge>
+                    </Td>
+                    <Td>
+                      {order.deliveryBoy?.name ? (
+                        <Text fontSize="sm">{sanitizeText(order.deliveryBoy.name)}</Text>
+                      ) : order.deliveryPerson?.name ? (
                         <Text fontSize="sm">{sanitizeText(order.deliveryPerson.name)}</Text>
                       ) : (
-                        <Text fontSize="sm" color="gray.400">-</Text>
+                        <Text fontSize="sm" color="gray.400">—</Text>
                       )}
                     </Td>
                     <Td>
@@ -451,6 +641,66 @@ export default function Orders() {
                   </HStack>
                 </Box>
 
+                <Box borderWidth="1px" borderColor="green.200" rounded="md" p={4} bg="green.50">
+                  <Text fontSize="xs" fontWeight="bold" color="green.800" mb={2}>
+                    RIDER ASSIGNMENT & HANDOFF (COURIER APP — READ ONLY)
+                  </Text>
+                  <Text fontSize="sm" color="gray.700" mb={3}>
+                    When a rider accepts this order in the courier app, they appear here. Pickup at the store and customer OTP are done in that app; packing is your internal process for each category below.
+                  </Text>
+                  <HStack spacing={3} flexWrap="wrap" mb={2}>
+                    <Badge colorScheme={orderDeliveryStatusColor(selectedOrder.deliveryStatus ?? undefined)}>
+                      {orderDeliveryStatusLabel(selectedOrder.deliveryStatus ?? undefined)}
+                    </Badge>
+                  </HStack>
+                  {selectedOrder.deliveryBoy?.name ? (
+                    <Text fontSize="sm" fontWeight="600" mb={1}>
+                      Assigned rider: {sanitizeText(selectedOrder.deliveryBoy.name)}
+                      {selectedOrder.deliveryBoy.phone ? (
+                        <Text as="span" fontWeight="400" color="gray.600">
+                          {" "}
+                          · {sanitizeText(selectedOrder.deliveryBoy.phone)}
+                        </Text>
+                      ) : null}
+                    </Text>
+                  ) : (
+                    <Text fontSize="sm" color="gray.600" mb={2}>
+                      No rider has accepted this order yet — it remains in the courier pool until someone accepts in the app.
+                    </Text>
+                  )}
+                  <VStack align="stretch" spacing={1} fontSize="xs" color="gray.600">
+                    {selectedOrder.acceptedAt ? (
+                      <Text>Rider accepted: {formatDate(selectedOrder.acceptedAt)}</Text>
+                    ) : null}
+                    {selectedOrder.pickedUpAt ? (
+                      <Text>Picked up from store / out for delivery: {formatDate(selectedOrder.pickedUpAt)}</Text>
+                    ) : null}
+                    {selectedOrder.deliveredAt ? (
+                      <Text>Completed: {formatDate(selectedOrder.deliveredAt)}</Text>
+                    ) : null}
+                  </VStack>
+                  {!selectedOrder.deliveryBoy?.name && selectedOrder.deliveryPerson?.name ? (
+                    <Text fontSize="xs" color="gray.600" mt={2}>
+                      Delivery contact (legacy): {sanitizeText(selectedOrder.deliveryPerson.name)}
+                    </Text>
+                  ) : null}
+                  {selectedOrder.deliveryPerson?.name &&
+                  selectedOrder.deliveryBoy?.name &&
+                  String(selectedOrder.deliveryPerson._id ?? "") !==
+                    String(selectedOrder.deliveryBoy._id ?? "") ? (
+                    <Text fontSize="xs" color="gray.500" mt={2}>
+                      Additional contact: {sanitizeText(selectedOrder.deliveryPerson.name ?? "")}
+                    </Text>
+                  ) : null}
+                </Box>
+
+                <Alert status="warning" borderRadius="md" fontSize="sm">
+                  <AlertIcon />
+                  <AlertDescription>
+                    <strong>Customer OTP:</strong> The courier sends it from their app after pickup; your buyer gets the code by push notification for doorstep confirmation. OTPs are never shown in the admin panel.
+                  </AlertDescription>
+                </Alert>
+
                 <Box>
                   <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={1}>CUSTOMER</Text>
                   <Text fontWeight="600">{sanitizeText(selectedOrder.user?.name ?? "-")}</Text>
@@ -469,15 +719,6 @@ export default function Orders() {
                     <Text fontSize="sm">
                       Phone: {sanitizeText(selectedOrder.address.phone)}
                     </Text>
-                  </Box>
-                )}
-
-                {selectedOrder.deliveryPerson && (
-                  <Box>
-                    <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={1}>DELIVERED BY</Text>
-                    <Text>{sanitizeText(selectedOrder.deliveryPerson.name)}</Text>
-                    <Text fontSize="sm" color="gray.600">{sanitizeText(selectedOrder.deliveryPerson.email)}</Text>
-                    <Text fontSize="sm" color="gray.600">{sanitizeText(selectedOrder.deliveryPerson.phone)}</Text>
                   </Box>
                 )}
 
@@ -500,20 +741,29 @@ export default function Orders() {
 
                 {(selectedOrder.subOrders ?? []).length > 0 && (
                   <Box>
-                    <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={2}>BY CATEGORY</Text>
+                    <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={1}>
+                      PACK / FULFIL BY CATEGORY (SUB-ORDERS)
+                    </Text>
+                    <Text fontSize="sm" color="gray.600" mb={2}>
+                      Each block is a separate bundle for fulfilment; couriers work these from the delivery app alongside the main ride assignment above.
+                    </Text>
                     <VStack align="stretch" spacing={2}>
                       {(selectedOrder.subOrders ?? []).map((sub: SubOrder) => (
                         <Box key={sub._id} p={3} bg="gray.50" rounded="md" borderWidth="1px" borderColor="gray.200">
-                          <Flex justify="space-between" mb={2}>
+                          <Flex justify="space-between" mb={2} flexWrap="wrap" gap={2}>
                             <Text fontWeight="600">{sanitizeText(sub.categoryName)}</Text>
-                            <Badge fontSize="xs">{sanitizeText(sub.deliveryStatus)}</Badge>
+                            <Badge fontSize="xs" colorScheme="blue">{sanitizeText(sub.deliveryStatus)}</Badge>
                           </Flex>
+                          <Text fontSize="xs" color="gray.600" mb={1}>
+                            {subOrderDeliveryLabel(sub.deliveryStatus)}
+                          </Text>
                           {sub.deliveryBoyId && (
                             <Text fontSize="xs" color="gray.600">
-                              Delivery: {sanitizeText(sub.deliveryBoyId.name)}
+                              Courier on this segment: {sanitizeText(sub.deliveryBoyId.name)}
+                              {sub.deliveryBoyId.phone ? ` · ${sanitizeText(sub.deliveryBoyId.phone)}` : ""}
                             </Text>
                           )}
-                          <Text fontSize="sm">Subtotal: Rs.{Number(sub.totalAmount).toLocaleString()}</Text>
+                          <Text fontSize="sm" mt={1}>Subtotal: Rs.{Number(sub.totalAmount).toLocaleString()}</Text>
                         </Box>
                       ))}
                     </VStack>

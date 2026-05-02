@@ -18,6 +18,7 @@ import {
   useToast,
 } from "@chakra-ui/react";
 import { useCallback, useEffect, useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import Header from "../components/Header";
 import Sidebar from "../components/Sidebar";
 import InventoryModuleRoute from "../components/InventoryModuleRoute";
@@ -104,6 +105,11 @@ export default function Inventory() {
           <Heading size="lg" mb={2}>
             Inventory
           </Heading>
+          <HStack mb={3}>
+            <Button as={RouterLink} to="/inventory/analysis" colorScheme="purple" size="sm">
+              Open Analysis
+            </Button>
+          </HStack>
           <Text color="gray.600" fontSize="sm" mb={6}>
             Stock rollups per product (same totals as batch quantities). Set a low-stock threshold to
             trigger domain audit events when quantity is at or below it.

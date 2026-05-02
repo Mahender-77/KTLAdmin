@@ -28,7 +28,9 @@ import AuditLogs from "./pages/SuperAdmin/AuditLogs";
 import Users from "./pages/SuperAdmin/Users";
 import UserDetail from "./pages/SuperAdmin/UserDetail";
 import Inventory from "./pages/Inventory";
+import InventoryAnalytics from "./pages/InventoryAnalytics";
 import TenantAuditEntries from "./pages/TenantAuditEntries";
+import Recommendations from "./pages/Recommendations";
 
 interface PrivateRouteProps {
   children: ReactNode;
@@ -184,10 +186,26 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/inventory/analysis"
+        element={
+          <PrivateRoute>
+            <InventoryAnalytics />
+          </PrivateRoute>
+        }
+      />
+      <Route
         path="/audit-entries"
         element={
           <PrivateRoute>
             <TenantAuditEntries />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/recommendations"
+        element={
+          <PrivateRoute>
+            <Recommendations />
           </PrivateRoute>
         }
       />

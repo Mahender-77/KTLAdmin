@@ -42,11 +42,44 @@ export default function Tenants() {
       const res = await axiosInstance.get("/api/super-admin/organizations", {
         params: { page, limit },
       });
-      setRows(res.data?.data ?? []);
-      setTotalPages(res.data?.totalPages ?? 1);
+      const body = res.data as Record<string, unknown> | unknown[] | null | undefined;
+      let list: OrgRow[] = [];
+      if (Array.isArray(body)) {
+        list = body as OrgRow[];
+        setRows(list);
+        setTotalPages(1);
+        return;
+      }
+      if (body && typeof body === "object") {
+        const o = body as Record<string, unknown>;
+        const raw =
+          o.data ??
+          o.organizations ??
+          o.items ??
+          o.results ??
+          (Array.isArray(o.docs) ? o.docs : null);
+        list = Array.isArray(raw) ? (raw as OrgRow[]) : [];
+        const tp =
+          (typeof o.totalPages === "number" ? o.totalPages : null) ??
+          (typeof o.pages === "number" ? o.pages : null) ??
+          (o.pagination && typeof o.pagination === "object"
+            ? (o.pagination as { totalPages?: number }).totalPages
+            : null);
+        const total = typeof o.total === "number" ? o.total : null;
+        let pages = typeof tp === "number" && tp >= 1 ? tp : 1;
+        if (pages === 1 && total != null && limit > 0) {
+          pages = Math.max(1, Math.ceil(total / limit));
+        }
+        setTotalPages(pages);
+        setRows(list);
+        return;
+      }
+      setRows(list);
+      setTotalPages(1);
     } catch {
       toast({ title: "Failed to load tenants", status: "error", duration: 4000 });
       setRows([]);
+      setTotalPages(1);
     } finally {
       setLoading(false);
     }
@@ -75,7 +108,7 @@ export default function Tenants() {
           <Box>
             <Heading size="lg">Tenants</Heading>
             <Text color="gray.600" fontSize="sm" mt={1}>
-              All organizations on the platform (Super Admin).
+              Client tenants you provision (excludes the shared B2C marketplace storefront).
             </Text>
           </Box>
           <Button colorScheme="orange" onClick={() => navigate("/super-admin/tenants/create")}>

@@ -22,6 +22,7 @@ const refreshClient = axios.create({
 });
 
 type ConfigWithRetry = InternalAxiosRequestConfig & { _retryAfterRefresh?: boolean };
+type ConfigWithCsrfRetry = ConfigWithRetry & { _retryAfterCsrf?: boolean };
 
 let sessionInvalidatedHandler: (() => void) | null = null;
 
@@ -190,8 +191,28 @@ function retryRequestWithToken(config: ConfigWithRetry, token: string) {
 axiosInstance.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    const original = error.config as ConfigWithRetry | undefined;
+    const original = error.config as ConfigWithCsrfRetry | undefined;
     const status = error.response?.status;
+    const apiMessage =
+      (error.response?.data as { message?: unknown } | undefined)?.message;
+    const isCsrfError =
+      status === 403 &&
+      typeof apiMessage === "string" &&
+      apiMessage.toLowerCase().includes("csrf");
+
+    if (isCsrfError && original && !original._retryAfterCsrf) {
+      // CSRF token can expire or first fetch may fail transiently.
+      // Clear cache and retry once after refreshing token.
+      original._retryAfterCsrf = true;
+      csrfFetchFailed = false;
+      csrfToken = null;
+      await ensureCsrfToken();
+      if (csrfToken) {
+        original.headers = original.headers ?? {};
+        (original.headers as Record<string, string>)["X-CSRF-Token"] = csrfToken;
+        return axiosInstance(original);
+      }
+    }
 
     if (status !== 401 || !original) {
       return Promise.reject(error);
